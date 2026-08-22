@@ -1,0 +1,10 @@
+{
+  "name": "Agropecuária Cacimba — Gestão do Rebanho",
+  "short_name": "Cacimba Rebanho",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f5",
+  "theme_color": "#0b6b36",
+  "lang": "pt-BR"
+}
