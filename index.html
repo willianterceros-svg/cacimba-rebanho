@@ -73,6 +73,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
 .lookup-card h4{margin:0 0 6px;color:var(--green)}.lookup-card small{color:var(--muted)}
 
 </style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -371,11 +372,38 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
   <div class="card"><div class="section-title" style="margin-top:0">Mais opções</div>
     <div class="rows">
       <div id="moreReproRow" class="row click" onclick="showScreen('repro')"><span>Cadastro de reprodutores</span><b>›</b></div>
+      <div id="moreReportsRow" class="row click" onclick="showScreen('reports')"><span>Relatórios / Exportar Excel</span><b>›</b></div>
       <div class="row click" onclick="showScreen('history')"><span>Histórico de alterações</span><b>›</b></div>
       <div id="moreImportRow" class="row click" onclick="showScreen('importStock')"><span>Importar estoque inicial</span><b>›</b></div>
       <div id="moreUsersRow" class="row click" onclick="showScreen('users')"><span>Cadastro de usuários</span><b>›</b></div>
     </div>
   </div>
+</section>
+
+<section id="reports" class="screen">
+  <div class="card">
+    <div class="section-title" style="margin-top:0">Relatórios do rebanho</div>
+    <label>Tipo de relatório</label>
+    <select id="reportType" onchange="updateReportPreview()">
+      <option value="stock">Estoque atual detalhado</option>
+      <option value="summary">Estoque resumido por sexo/idade</option>
+      <option value="births">Nascimentos</option>
+      <option value="sales">Vendas</option>
+      <option value="deaths">Mortes</option>
+      <option value="movement">Movimentação do estoque</option>
+    </select>
+    <div class="grid2">
+      <div><label>Data inicial</label><input id="reportDateFrom" type="date" onchange="updateReportPreview()"></div>
+      <div><label>Data final</label><input id="reportDateTo" type="date" onchange="updateReportPreview()"></div>
+    </div>
+    <label>Sexo</label>
+    <select id="reportSex" onchange="updateReportPreview()"><option value="">Todos</option><option value="F">Fêmeas</option><option value="M">Machos</option></select>
+    <label>Identificação</label>
+    <select id="reportIdentified" onchange="updateReportPreview()"><option value="">Todos</option><option value="identified">Somente identificados</option><option value="unidentified">Somente sem identificação</option></select>
+  </div>
+  <div class="card"><div class="section-title" style="margin-top:0">Prévia</div><div id="reportPreview" class="notice">Selecione o relatório e os filtros.</div></div>
+  <button class="btn primary" onclick="exportCurrentReport()">Exportar Excel (.xlsx)</button>
+  <button class="btn secondary" onclick="exportFilteredStockReport()">Exportar estoque filtrado</button>
 </section>
 
 <section id="history" class="screen">
@@ -398,6 +426,7 @@ const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 const today=()=>new Date().toISOString().slice(0,10);
 ["birthDate","saleDate","deathDate"].forEach(id=>document.getElementById(id).value=today());
+const reportTo=document.getElementById("reportDateTo");if(reportTo)reportTo.value=today();
 
 const defaultUsers=[
  {uid:"usr_owner",name:"Proprietário",login:"proprietario",password:"1234",role:"OWNER",firstLogin:true,active:true,protected:true}
@@ -442,8 +471,8 @@ function applyPermissions(){
  const role=currentUser?.role;
  const owner=role==="OWNER",admin=role==="ADMIN",field=role==="FIELD";
  const set=(id,show)=>{const el=document.getElementById(id);if(el)el.classList.toggle("permission-hidden",!show)};
- set("navRepro",!field);set("moreReproRow",!field);set("moreImportRow",owner||admin);set("moreUsersRow",owner);set("stockAdminActions",owner||admin);set("accountUsersBtn",owner);set("searchEditGenealogyBtn",owner||admin);
- if(field && ["repro","addRepro","reproDetail","editRepro","users","addUser","importStock","addAnimal","editAnimal"].includes(document.querySelector(".screen.active")?.id))showScreen("stock",false);
+ set("navRepro",!field);set("moreReproRow",!field);set("moreReportsRow",owner||admin);set("moreImportRow",owner||admin);set("moreUsersRow",owner);set("stockAdminActions",owner||admin);set("accountUsersBtn",owner);set("searchEditGenealogyBtn",owner||admin);
+ if(field && ["repro","addRepro","reproDetail","editRepro","users","addUser","importStock","addAnimal","editAnimal","reports"].includes(document.querySelector(".screen.active")?.id))showScreen("stock",false);
 }
 function renderAccount(){
  if(!currentUser)return;
@@ -512,6 +541,21 @@ if(!localStorage.getItem(INITIAL_STOCK_VERSION)){
 }
 let herd=Array.isArray(storedHerd)?storedHerd:initialRealHerd;
 let history=JSON.parse(localStorage.getItem("cacimba_history_demo")||"[]");
+function reportMonthsOld(birth){if(!birth)return null;const d=new Date(birth+"T12:00:00"),n=new Date();let m=(n.getFullYear()-d.getFullYear())*12+n.getMonth()-d.getMonth();if(n.getDate()<d.getDate())m--;return Math.max(0,m)}
+function reportAgeBand(m){if(m===null)return "Idade não informada";if(m<12)return "0–12 meses";if(m<24)return "12–24 meses";if(m<36)return "24–36 meses";return "36+ meses"}
+function reportFilteredHerd(){const sex=document.getElementById("reportSex")?.value||"",ident=document.getElementById("reportIdentified")?.value||"";return herd.filter(a=>(!a.status||a.status==="ATIVO")&&(!sex||a.sex===sex)&&!(ident==="identified"&&!String(a.id||"").trim())&&!(ident==="unidentified"&&String(a.id||"").trim()))}
+function reportStockRows(){return reportFilteredHerd().map(a=>({"Identificação":a.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Data de nascimento":a.birth||"","Idade (meses)":reportMonthsOld(a.birth),"Faixa etária":reportAgeBand(reportMonthsOld(a.birth)),"Pai":a.father||"","Mãe":a.mother||"","Avô paterno":a.pgf||"","Avó paterna":a.pgm||"","Avô materno":a.mgf||"","Avó materna":a.mgm||"","Peso último manejo (kg)":a.weight??"","Origem":a.origin||"","Observações":a.notes||""}))}
+function reportSummaryRows(){const map={};reportFilteredHerd().forEach(a=>{const sx=a.sex==="F"?"Fêmeas":a.sex==="M"?"Machos":"Não informado",band=reportAgeBand(reportMonthsOld(a.birth)),k=sx+"|"+band;map[k]=(map[k]||0)+1});return Object.entries(map).map(([k,v])=>{const [sx,band]=k.split("|");return {"Sexo":sx,"Faixa etária":band,"Quantidade":v}})}
+function reportHistoryDate(h){if(h.date)return h.date;const w=String(h.when||"");const m=w.match(/^(\d{2})\/(\d{2})\/(\d{4})/);return m?`${m[3]}-${m[2]}-${m[1]}`:""}
+function reportInPeriod(date){const f=document.getElementById("reportDateFrom")?.value||"",t=document.getElementById("reportDateTo")?.value||"";return (!f||!date||date>=f)&&(!t||!date||date<=t)}
+function reportHistoryRows(type){const terms={births:["nascimento registrado"],sales:["venda para"],deaths:["morte registrada"]}[type]||[];return history.filter(h=>terms.some(t=>String(h.msg||h.message||"").toLowerCase().includes(t))&&reportInPeriod(reportHistoryDate(h))).map(h=>({"Data do registro":reportHistoryDate(h),"Data/hora da auditoria":h.when||"","Descrição":h.msg||h.message||""}))}
+function reportMovementRows(){const b=reportHistoryRows("births").length,s=reportHistoryRows("sales").length,d=reportHistoryRows("deaths").length,current=reportFilteredHerd().length;return [{"Estoque inicial estimado":current-b+s+d,"Nascimentos":b,"Vendas":s,"Mortes":d,"Estoque final":current}]}
+function reportCurrentRows(){const t=document.getElementById("reportType")?.value||"stock";if(t==="stock")return reportStockRows();if(t==="summary")return reportSummaryRows();if(t==="births")return reportHistoryRows("births");if(t==="sales")return reportHistoryRows("sales");if(t==="deaths")return reportHistoryRows("deaths");if(t==="movement")return reportMovementRows();return []}
+function updateReportPreview(){const p=document.getElementById("reportPreview");if(!p)return;const rows=reportCurrentRows();p.innerHTML=`<b>${rows.length}</b> registro(s) no relatório selecionado.`}
+function exportReportRows(rows,name){if(typeof XLSX==="undefined")return alert("A biblioteca de Excel ainda não foi carregada. Conecte o aparelho à internet e abra o aplicativo novamente para habilitar a exportação.");if(!rows.length)return alert("Não há dados para exportar com os filtros escolhidos.");const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Relatório");XLSX.writeFile(wb,name+"_"+new Date().toISOString().slice(0,10)+".xlsx")}
+function exportCurrentReport(){const t=document.getElementById("reportType").value,n={stock:"estoque_detalhado",summary:"estoque_resumido",births:"nascimentos",sales:"vendas",deaths:"mortes",movement:"movimentacao_estoque"};exportReportRows(reportCurrentRows(),n[t]||"relatorio_rebanho")}
+function exportFilteredStockReport(){exportReportRows(reportStockRows(),"estoque_filtrado")}
+
 let navHistory=[];
 let currentAnimalUid=null,currentAgeSex="F",currentAgeRange="0-12",currentAgeExact=null,weaning=false,saleSelected=[];
 let reproducers=JSON.parse(localStorage.getItem("cacimba_repro_demo")||"null")||[
@@ -679,13 +723,13 @@ function addReproducer(){
 
 function renderHistory(){historyList.innerHTML=history.length?history.map(h=>`<div class="row"><div><b>${h.msg}</b><div class="muted">${h.when}</div></div></div>`).join(""):`<div class="center muted">Ainda não há alterações nesta demonstração.</div>`}
 function setHeader(t,s){title.textContent=t;subtitle.textContent=s||"Agropecuária Cacimba"}
-const labels={stock:["Estoque do Rebanho","Agropecuária Cacimba"],moves:["Movimentações","Nascimento, venda e morte"],search:["Pesquisa","Consulta rápida offline"],repro:["Reprodutores","Proprietário / Administrador"],more:["Mais","Configurações e cadastros"],addAnimal:["Cadastrar animal","Entrada manual no estoque"],importStock:["Importar estoque","Carga inicial via Excel"],editAnimal:["Editar Animal","Ficha individual"],addRepro:["Adicionar reprodutor","Cadastro e genealogia"],reproDetail:["Ficha do reprodutor","Genealogia"],editRepro:["Editar reprodutor","Cadastro e genealogia"],history:["Histórico","Auditoria de alterações"],users:["Usuários","Gerenciamento de acessos"],addUser:["Cadastrar usuário","Novo acesso ao sistema"],account:["Minha conta","Usuário e perfil"]}
+const labels={stock:["Estoque do Rebanho","Agropecuária Cacimba"],moves:["Movimentações","Nascimento, venda e morte"],search:["Pesquisa","Consulta rápida offline"],repro:["Reprodutores","Proprietário / Administrador"],more:["Mais","Configurações e cadastros"],addAnimal:["Cadastrar animal","Entrada manual no estoque"],importStock:["Importar estoque","Carga inicial via Excel"],editAnimal:["Editar Animal","Ficha individual"],addRepro:["Adicionar reprodutor","Cadastro e genealogia"],reproDetail:["Ficha do reprodutor","Genealogia"],editRepro:["Editar reprodutor","Cadastro e genealogia"],reports:["Relatórios","Exportação em Excel"],history:["Histórico","Auditoria de alterações"],users:["Usuários","Gerenciamento de acessos"],addUser:["Cadastrar usuário","Novo acesso ao sistema"],account:["Minha conta","Usuário e perfil"]}
 function showScreen(id,push=true){
  if(currentUser){
    if(currentUser.role==="FIELD"&&["repro","addRepro","reproDetail","editRepro","users","addUser","importStock","addAnimal","editAnimal"].includes(id))return alert("Seu perfil não tem acesso a este módulo.");
    if(currentUser.role==="ADMIN"&&["users","addUser"].includes(id))return alert("Somente o Proprietário pode gerenciar usuários.");
  }
- const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.style.visibility=["stock","moves","search","repro","more"].includes(id)?"hidden":"visible";document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="users")renderUsers();if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
+ const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.style.visibility=["stock","moves","search","repro","more"].includes(id)?"hidden":"visible";document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="reports")updateReportPreview();if(id==="users")renderUsers();if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
 function navTo(id,btn){navHistory=[];showScreen(id,false)}
 function goBack(){const id=navHistory.pop()||"stock";showScreen(id,false);if(id==="ageList")renderAgeScreen();if(id==="animalDetail")renderAnimalDetail()}
 stockFile.onchange=e=>stockFileName.textContent=e.target.files[0]?.name||"Nenhum arquivo selecionado";
