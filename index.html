@@ -427,7 +427,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
 const SUPABASE_URL="https://kwogzwdidzenfmdxmiwv.supabase.co";
 const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b2d6d2RpZHplbmZtZHhtaXd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4MDM4OTMsImV4cCI6MjEwMjM3OTg5M30.EXX4HMhPQKcrGh9X9vq9Z8Vr8bqz4shVCKwPk59DO_Y";
 
-const today=()=>new Date().toISOString().slice(0,10);
+const today=()=>cacimbaLocalDateISO(new Date());
 ["birthDate","saleDate","deathDate","reportDateTo"].forEach(id=>{const el=document.getElementById(id);if(el)el.value=today()});
 
 const defaultUsers=[
@@ -763,6 +763,16 @@ if("serviceWorker" in navigator){
   swReloading=true;
   window.location.reload();
  });
+}
+
+
+
+function cacimbaLocalDateISO(dateObj){
+  const d=dateObj || new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,"0");
+  const day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
 }
 
 </script>
