@@ -644,13 +644,35 @@ function renderAgeAnimals(){
  ageAnimals.innerHTML=list.length?list.map(a=>`<div class="animalRow" onclick="openAnimal('${a.uid}')"><div class="sexicon" style="background:${a.sex==="F"?"var(--femaleSoft)":"var(--maleSoft)"};color:${a.sex==="F"?"var(--female)":"var(--male)"}">${a.sex==="F"?"":""}</div><div><b>${displayId(a)}</b><div class="muted">Nascimento: ${fmtDate(a.birth)}</div></div><span class="badge ${a.sex==="F"?"f":"m"}">${monthsOld(a.birth)??"?"}m</span></div>`).join(""):`<div class="center muted">Nenhum animal neste filtro.</div>`
 }
 function openAnimal(uid){currentAnimalUid=uid;showScreen("animalDetail");renderAnimalDetail()}
-function renderAnimalDetail(){const a=herd.find(x=>x.uid===currentAnimalUid);if(!a)return;setHeader("Ficha do Animal","Cadastro individual");detailSexIcon.textContent="";detailSexIcon.style.color=a.sex==="F"?"var(--female)":"var(--male)";detailId.textContent=displayId(a);detailSexAge.textContent=`${a.sex==="F"?"Fêmea":"Macho"} • ${ageText(a)}`;detailStatus.textContent=a.status;detailBirth.textContent=fmtDate(a.birth);detailAge.textContent=ageText(a);detailFather.textContent=a.father||"Não informado";detailMother.textContent=a.mother||"Não informada";detailPGF.textContent=a.pgf||"—";detailPGM.textContent=a.pgm||"—";detailMGF.textContent=a.mgf||"—";detailMGM.textContent=a.mgm||"—";detailBreed.textContent=a.breed||"—";detailOrigin.textContent=a.origin||"—";detailNotes.textContent=a.notes||"—"}
+function renderAnimalDetail(){
+ const a=herd.find(x=>x.uid===currentAnimalUid);if(!a)return;
+ const g=resolveAnimalGenealogy(a);
+ setHeader("Ficha do Animal","Cadastro individual");
+ detailSexIcon.textContent="";
+ detailSexIcon.style.color=a.sex==="F"?"var(--female)":"var(--male)";
+ detailId.textContent=displayId(a);
+ detailSexAge.textContent=`${a.sex==="F"?"Fêmea":"Macho"} • ${ageText(a)}`;
+ detailStatus.textContent=a.status;
+ detailBirth.textContent=fmtDate(a.birth);
+ detailAge.textContent=ageText(a);
+ detailFather.textContent=a.father||"Não informado";
+ detailMother.textContent=a.mother||"Não informada";
+ detailPGF.textContent=g.pgf||"—";
+ detailPGM.textContent=g.pgm||"—";
+ detailMGF.textContent=g.mgf||"—";
+ detailMGM.textContent=g.mgm||"—";
+ detailBreed.textContent=a.breed||"—";
+ detailOrigin.textContent=a.origin||"—";
+ detailNotes.textContent=a.notes||"—";
+}
 function openEditAnimal(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar o cadastro do animal.");const a=herd.find(x=>x.uid===currentAnimalUid);editId.value=a.id||"";editSex.value=a.sex;editBirth.value=a.birth||"";editFather.value=a.father||"";editMother.value=a.mother||"";editPGF.value=a.pgf||"";editPGM.value=a.pgm||"";editMGF.value=a.mgf||"";editMGM.value=a.mgm||"";editBreed.value=a.breed||"";editNotes.value=a.notes||"";showScreen("editAnimal")}
 function saveAnimalEdit(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const a=herd.find(x=>x.uid===currentAnimalUid),newId=editId.value.trim()||null;if(newId&&herd.some(x=>x.uid!==a.uid&&x.id&&x.id.toLowerCase()===newId.toLowerCase()))return alert("Já existe um animal com esta identificação.");const before=displayId(a);Object.assign(a,{id:newId,sex:editSex.value,birth:editBirth.value||null,father:editFather.value.trim(),mother:editMother.value.trim(),pgf:editPGF.value.trim(),pgm:editPGM.value.trim(),mgf:editMGF.value.trim(),mgm:editMGM.value.trim(),breed:editBreed.value.trim(),notes:editNotes.value.trim()});delete a.fatherReproUid;delete a.damKey;log(`Animal ${before}: cadastro e genealogia editados${before!==displayId(a)?`; identificação alterada para ${displayId(a)}`:""}.`);save();renderStock();openAnimal(a.uid)}
 function addAnimal(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const id=newId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const a={uid:"u"+Date.now(),id,sex:newSex.value,birth:newBirth.value||null,father:newFather.value.trim(),mother:newMother.value.trim(),pgf:newPGF.value.trim(),pgm:newPGM.value.trim(),mgf:newMGF.value.trim(),mgm:newMGM.value.trim(),breed:newBreed.value.trim(),status:"ATIVO",origin:"Cadastro manual",notes:""};herd.push(a);log(`Animal ${displayId(a)} cadastrado manualmente e incluído no estoque.`);renderStock();showScreen("stock")}
 function moveTab(tab,btn){["birth","sale","death"].forEach(x=>document.getElementById(x+"Tab").classList.toggle("hidden",x!==tab));document.querySelectorAll("#moves>.tabrow .tabbtn").forEach(b=>b.classList.remove("active"));btn.classList.add("active")}
 function registerBirth(){const id=birthId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const mother=birthMother.value.trim(),date=birthDate.value;if(!date)return alert("Informe a data.");if(mother){const mom=herd.find(x=>x.id===mother&&x.sex==="F");if(mom){const children=herd.filter(x=>x.mother===mother&&x.birth).sort((a,b)=>b.birth.localeCompare(a.birth));if(children.length){const last=children[0].birth;const min=new Date(last+"T12:00:00");min.setMonth(min.getMonth()+9);const newD=new Date(date+"T12:00:00");const sameTwin=twinCheck.checked&&date===last;if(newD<min&&!sameTwin)return alert(`Nascimento bloqueado: último parto em ${fmtDate(last)}. Regra mínima de 9 meses, salvo gemelar na mesma data.`)}}}
- const a={uid:"u"+Date.now(),id,sex:birthSex.value,birth:date,father:birthFather.value,mother,breed:birthBreed.value.trim(),status:"ATIVO",origin:"Nascimento",notes:""};herd.push(a);addMovementEvent({type:"birth",date,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||""});log(`Nascimento registrado: ${displayId(a)}. Estoque aumentado automaticamente.`);renderStock();alert("Nascimento registrado e estoque atualizado.");birthId.value=""}
+ const selectedSire=reproducers.find(r=>normalizeReproName(r.name)===normalizeReproName(birthFather.value));
+ const selectedDam=mother ? herd.find(x=>x.sex==="F"&&x.id&&normalizeReproName(x.id)===normalizeReproName(mother)) : null;
+ const a={uid:"u"+Date.now(),id,sex:birthSex.value,birth:date,father:birthFather.value,mother,breed:birthBreed.value.trim(),status:"ATIVO",origin:"Nascimento",notes:"",fatherReproUid:selectedSire?.uid||null,damKey:selectedDam?("herd:"+selectedDam.uid):null};herd.push(a);addMovementEvent({type:"birth",date,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||""});log(`Nascimento registrado: ${displayId(a)}. Estoque aumentado automaticamente.`);renderStock();alert("Nascimento registrado e estoque atualizado.");birthId.value=""}
 function saleMode(m){saleManual.classList.toggle("hidden",m!=="manual");saleExcel.classList.toggle("hidden",m!=="excel");saleManualBtn.classList.toggle("active",m==="manual");saleExcelBtn.classList.toggle("active",m==="excel")}
 function addSaleAnimal(){const id=saleAnimal.value.trim();if(!id)return;const a=herd.find(x=>x.id===id&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.");if(saleSelected.includes(a.uid))return alert("Animal já selecionado.");saleSelected.push(a.uid);saleAnimal.value="";renderSaleSelected()}
 function renderSaleSelected(){saleSelected.innerHTML="";document.getElementById("saleSelected").innerHTML=saleSelected.map(uid=>{const a=herd.find(x=>x.uid===uid);return`<div class="row"><span>${displayId(a)}</span><button class="icon" onclick="removeSale('${uid}')">×</button></div>`}).join("")}
@@ -659,7 +681,53 @@ function simulateSaleAnalysis(){saleAnalysis.classList.remove("hidden")}
 function confirmSale(){if(!saleBuyer.value.trim())return alert("Informe o comprador.");if(!saleManual.classList.contains("hidden")){if(!saleSelected.length)return alert("Selecione ao menos um animal.");const date=saleDate.value||today(),buyer=saleBuyer.value.trim();saleSelected.forEach(uid=>{const a=herd.find(x=>x.uid===uid);if(a){a.status="VENDIDO";addMovementEvent({type:"sale",date,animalUid:a.uid,id:a.id||"",sex:a.sex,buyer})}});log(`Venda para ${buyer}: ${saleSelected.length} animal(is) baixados do estoque.`);saleSelected=[];renderSaleSelected();renderStock();alert("Venda registrada e estoque atualizado.")}else{alert("Nesta prévia, o Excel de venda está em modo demonstrativo. A leitura real será ligada quando definirmos o formato da planilha.")}}
 function renderDeathMode(){deathIdentified.classList.toggle("hidden",deathMode.value!=="identified");deathUnidentified.classList.toggle("hidden",deathMode.value!=="unidentified")}
 function registerDeath(){let a;if(deathMode.value==="identified"){a=herd.find(x=>x.id===deathId.value.trim()&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.")}else{a=activeHerd().find(x=>!x.id&&x.sex===deathSex.value&&rangeOf(x)===deathAge.value);if(!a)return alert("Nenhum animal sem identificação encontrado nessa combinação.")}const date=deathDate.value||today(),cause=deathCause.value;a.status="MORTO";addMovementEvent({type:"death",date,animalUid:a.uid,id:a.id||"",sex:a.sex,cause});log(`Morte registrada: ${displayId(a)} (${cause}). Animal retirado do estoque ativo.`);renderStock();alert("Morte registrada e estoque atualizado.")}
-function searchIndividual(){const q=individualSearch.value.trim().toLowerCase();const a=herd.find(x=>x.id&&x.id.toLowerCase()===q);searchResult.classList.toggle("hidden",!a);searchNotFound.classList.toggle("hidden",!!a);if(!a)return;currentAnimalUid=a.uid;srId.textContent=displayId(a);srSexAge.textContent=`${a.sex==="F"?" Fêmea":" Macho"} • ${ageText(a)}`;srMeta.textContent=`Nascimento: ${fmtDate(a.birth)} • Raça: ${a.breed||"—"} • Status: ${a.status}`;srFather.textContent=a.father||"Não informado";srMother.textContent=a.mother||"Não informada";srPGF.textContent=a.pgf||"Não informado";srPGM.textContent=a.pgm||"Não informada";srMGF.textContent=a.mgf||"Não informado";srMGM.textContent=a.mgm||"Não informada";applyPermissions()}
+
+function resolveAnimalGenealogy(a){
+  if(!a) return {pgf:"",pgm:"",mgf:"",mgm:""};
+
+  const sire = (a.fatherReproUid && reproducers.find(r=>r.uid===a.fatherReproUid))
+    || reproducers.find(r=>normalizeReproName(r.name)===normalizeReproName(a.father));
+
+  let dam = null;
+  if(a.damKey){
+    dam = findDamByKey(a.damKey);
+  }
+  if(!dam && a.mother){
+    const momKey = normalizeReproName(a.mother);
+    dam = herd.find(x=>x.sex==="F" && x.id && normalizeReproName(x.id)===momKey)
+      || historicalDams.find(x=>{
+        const label=x.id||x.name||"";
+        return normalizeReproName(label)===momKey;
+      });
+  }
+
+  return {
+    pgf:(sire && sire.father) || a.pgf || "",
+    pgm:(sire && sire.mother) || a.pgm || "",
+    mgf:(dam && dam.father) || a.mgf || "",
+    mgm:(dam && dam.mother) || a.mgm || ""
+  };
+}
+
+function searchIndividual(){
+ const q=individualSearch.value.trim().toLowerCase();
+ const a=herd.find(x=>x.id&&x.id.toLowerCase()===q);
+ searchResult.classList.toggle("hidden",!a);
+ searchNotFound.classList.toggle("hidden",!!a);
+ if(!a)return;
+ currentAnimalUid=a.uid;
+ const g=resolveAnimalGenealogy(a);
+ srId.textContent=displayId(a);
+ srSexAge.textContent=`${a.sex==="F"?" Fêmea":" Macho"} • ${ageText(a)}`;
+ srMeta.textContent=`Nascimento: ${fmtDate(a.birth)} • Raça: ${a.breed||"—"} • Status: ${a.status}`;
+ srFather.textContent=a.father||"Não informado";
+ srMother.textContent=a.mother||"Não informada";
+ srPGF.textContent=g.pgf||"Não informado";
+ srPGM.textContent=g.pgm||"Não informada";
+ srMGF.textContent=g.mgf||"Não informado";
+ srMGM.textContent=g.mgm||"Não informada";
+ applyPermissions();
+}
 function editGenealogyFromSearch(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar a genealogia.");if(!currentAnimalUid)return alert("Pesquise um animal primeiro.");openEditAnimal()}
 function initials(name){return (name||"?").split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase()}
 function statusText(r){return r.status==="linked"?"Genealogia vinculada":r.status==="manual"?"Preenchida manualmente":r.status==="notfound"?"Genealogia não encontrada":"Padrão do sistema"}
