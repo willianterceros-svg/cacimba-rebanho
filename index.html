@@ -610,6 +610,7 @@ function findReproByUid(uid){return reproducers.find(r=>r.uid===uid)}
 
 
 function save(){localStorage.setItem("cacimba_herd_demo",JSON.stringify(herd));localStorage.setItem("cacimba_history_demo",JSON.stringify(history));localStorage.setItem("cacimba_repro_demo",JSON.stringify(reproducers))}
+migrateLegacyGenealogyLinks();
 function log(msg){const actor=currentUser?`${currentUser.name} (@${currentUser.login})`:"Sistema";history.unshift({when:new Date().toLocaleString("pt-BR"),msg:`${msg} — por ${actor}`});save();renderHistory()}
 function monthsOld(b){if(!b)return null;let d=new Date(b+"T12:00:00"),n=new Date(),m=(n.getFullYear()-d.getFullYear())*12+n.getMonth()-d.getMonth();if(n.getDate()<d.getDate())m--;return Math.max(0,m)}
 function ageText(a){const m=monthsOld(a.birth);if(m===null)return"Idade não informada";if(m<12)return`${m} meses`;const y=Math.floor(m/12),r=m%12;return r?`${y} ano${y>1?"s":""} e ${r}m`:`${y} ano${y>1?"s":""}`}
@@ -682,23 +683,52 @@ function confirmSale(){if(!saleBuyer.value.trim())return alert("Informe o compra
 function renderDeathMode(){deathIdentified.classList.toggle("hidden",deathMode.value!=="identified");deathUnidentified.classList.toggle("hidden",deathMode.value!=="unidentified")}
 function registerDeath(){let a;if(deathMode.value==="identified"){a=herd.find(x=>x.id===deathId.value.trim()&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.")}else{a=activeHerd().find(x=>!x.id&&x.sex===deathSex.value&&rangeOf(x)===deathAge.value);if(!a)return alert("Nenhum animal sem identificação encontrado nessa combinação.")}const date=deathDate.value||today(),cause=deathCause.value;a.status="MORTO";addMovementEvent({type:"death",date,animalUid:a.uid,id:a.id||"",sex:a.sex,cause});log(`Morte registrada: ${displayId(a)} (${cause}). Animal retirado do estoque ativo.`);renderStock();alert("Morte registrada e estoque atualizado.")}
 
+function canonicalGenealogyName(s){
+  return normalizeReproName(s)
+    .replace(/[^\p{L}\p{N}\s]/gu," ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(w=>!["fiv","da","de","do","das","dos"].includes(w))
+    .join(" ");
+}
+
+function findReproducerForAnimal(a){
+  if(!a || !a.father) return null;
+
+  if(a.fatherReproUid){
+    const byUid=reproducers.find(r=>r.uid===a.fatherReproUid);
+    if(byUid) return byUid;
+  }
+
+  const exact=normalizeReproName(a.father);
+  let matches=reproducers.filter(r=>normalizeReproName(r.name)===exact);
+  if(matches.length===1) return matches[0];
+
+  const canon=canonicalGenealogyName(a.father);
+  matches=reproducers.filter(r=>canonicalGenealogyName(r.name)===canon);
+  if(matches.length===1) return matches[0];
+
+  // Legacy tolerance: "Bugatti de Navirai" x "Bugatti FIV de Naviraí".
+  matches=reproducers.filter(r=>{
+    const rn=canonicalGenealogyName(r.name);
+    return canon.length>=5 && rn.length>=5 && (rn.includes(canon) || canon.includes(rn));
+  });
+  if(matches.length===1) return matches[0];
+
+  return null;
+}
+
 function resolveAnimalGenealogy(a){
   if(!a) return {pgf:"",pgm:"",mgf:"",mgm:""};
 
-  const sire = (a.fatherReproUid && reproducers.find(r=>r.uid===a.fatherReproUid))
-    || reproducers.find(r=>normalizeReproName(r.name)===normalizeReproName(a.father));
+  const sire=findReproducerForAnimal(a);
 
-  let dam = null;
-  if(a.damKey){
-    dam = findDamByKey(a.damKey);
-  }
+  let dam=null;
+  if(a.damKey) dam=findDamByKey(a.damKey);
   if(!dam && a.mother){
-    const momKey = normalizeReproName(a.mother);
-    dam = herd.find(x=>x.sex==="F" && x.id && normalizeReproName(x.id)===momKey)
-      || historicalDams.find(x=>{
-        const label=x.id||x.name||"";
-        return normalizeReproName(label)===momKey;
-      });
+    const momKey=normalizeReproName(a.mother);
+    dam=herd.find(x=>x.sex==="F" && x.id && normalizeReproName(x.id)===momKey)
+      || historicalDams.find(x=>normalizeReproName(x.id||x.name||"")===momKey);
   }
 
   return {
@@ -707,6 +737,19 @@ function resolveAnimalGenealogy(a){
     mgf:(dam && dam.father) || a.mgf || "",
     mgm:(dam && dam.mother) || a.mgm || ""
   };
+}
+
+function migrateLegacyGenealogyLinks(){
+  let changed=false;
+  herd.forEach(a=>{
+    if(!a.father || a.fatherReproUid) return;
+    const sire=findReproducerForAnimal(a);
+    if(sire){
+      a.fatherReproUid=sire.uid;
+      changed=true;
+    }
+  });
+  if(changed) save();
 }
 
 function searchIndividual(){
@@ -783,7 +826,7 @@ function addReproducer(){
 function reportAgeBand(months){if(months===null)return"Idade não informada";if(months<12)return"0–12 meses";if(months<24)return"12–24 meses";if(months<36)return"24–36 meses";return"36+ meses"}
 function reportFilteredAnimals(list){const sex=document.getElementById("reportSex")?.value||"",ident=document.getElementById("reportIdentified")?.value||"";return list.filter(a=>{if(sex&&a.sex!==sex)return false;if(ident==="identified"&&!String(a.id||"").trim())return false;if(ident==="unidentified"&&String(a.id||"").trim())return false;return true})}
 function reportInPeriod(date){const from=document.getElementById("reportDateFrom")?.value||"",to=document.getElementById("reportDateTo")?.value||"";if(!date)return !from&&!to;return(!from||date>=from)&&(!to||date<=to)}
-function reportStockRows(){return reportFilteredAnimals(activeHerd()).map(a=>({"Identificação":a.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Data de nascimento":a.birth||"","Idade (meses)":monthsOld(a.birth),"Faixa etária":reportAgeBand(monthsOld(a.birth)),"Pai":a.father||"","Mãe":a.mother||"","Avô paterno":a.pgf||"","Avó paterna":a.pgm||"","Avô materno":a.mgf||"","Avó materna":a.mgm||"","Raça":a.breed||"","Peso último manejo (kg)":a.weight??"","Origem":a.origin||"","Observações":a.notes||""}))}
+function reportStockRows(){return reportFilteredAnimals(activeHerd()).map(a=>{const g=resolveAnimalGenealogy(a);return {"Identificação":a.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Data de nascimento":a.birth||"","Idade (meses)":monthsOld(a.birth),"Faixa etária":reportAgeBand(monthsOld(a.birth)),"Pai":a.father||"","Mãe":a.mother||"","Avô paterno":g.pgf||"","Avó paterna":g.pgm||"","Avô materno":g.mgf||"","Avó materna":g.mgm||"","Raça":a.breed||"","Peso último manejo (kg)":a.weight??"","Origem":a.origin||"","Observações":a.notes||""}})}
 function reportSummaryRows(){const map={};reportFilteredAnimals(activeHerd()).forEach(a=>{const sexo=a.sex==="F"?"Fêmeas":a.sex==="M"?"Machos":"Não informado",faixa=reportAgeBand(monthsOld(a.birth)),key=sexo+"|"+faixa;map[key]=(map[key]||0)+1});return Object.entries(map).map(([k,v])=>{const[sexo,faixa]=k.split("|");return{"Sexo":sexo,"Faixa etária":faixa,"Quantidade":v}})}
 function reportEventRows(type){let events=movementEvents.filter(e=>e.type===type&&reportInPeriod(e.date));const seen=new Set(events.map(e=>e.animalUid).filter(Boolean));if(type==="birth"){herd.filter(a=>a.origin==="Nascimento"&&!seen.has(a.uid)&&reportInPeriod(a.birth)).forEach(a=>events.push({type:"birth",date:a.birth,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||"",user:"Registro anterior"}))}else if(!document.getElementById("reportDateFrom").value&&!document.getElementById("reportDateTo").value){const st=type==="sale"?"VENDIDO":"MORTO";herd.filter(a=>a.status===st&&!seen.has(a.uid)).forEach(a=>events.push({type,date:"",animalUid:a.uid,id:a.id||"",sex:a.sex,user:"Registro anterior"}))}
 events=events.filter(e=>{const a=herd.find(x=>x.uid===e.animalUid)||e;return reportFilteredAnimals([a]).length});return events.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(e=>type==="birth"?{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Mãe":e.mother||"","Pai":e.father||"","Raça":e.breed||"","Responsável":e.user||""}:type==="sale"?{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Comprador":e.buyer||"","Responsável":e.user||""}:{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Causa":e.cause||"","Responsável":e.user||""})}
