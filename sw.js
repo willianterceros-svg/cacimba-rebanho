@@ -1,4 +1,4 @@
-const CACHE_NAME = "cacimba-rebanho-v20260822-2225-genealogia-v2-backup";
+const CACHE_NAME = "cacimba-rebanho-v20260824-cloud-v1";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {
