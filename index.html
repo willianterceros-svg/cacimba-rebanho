@@ -365,6 +365,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
     <div id="accountRole" style="margin-top:12px"></div>
   </div>
   <button id="accountUsersBtn" class="btn secondary" onclick="showScreen('users')">Gerenciar usuários</button>
+  <button class="btn secondary" onclick="exportFullBackup()">Baixar backup completo</button>
   <button class="btn danger" onclick="logout()">Sair</button>
 </section>
 
@@ -461,6 +462,62 @@ function startSession(u){
  loginShell.classList.add("hidden");firstPasswordShell.classList.add("hidden");
  applyPermissions();renderAccount();showScreen("stock",false);
 }
+async function exportFullBackup(){
+  try{
+    const localData={};
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(key && key.startsWith("cacimba_")) localData[key]=localStorage.getItem(key);
+    }
+
+    const payload={
+      app:"Agropecuária Cacimba — Gestão do Rebanho",
+      backupVersion:1,
+      generatedAt:new Date().toISOString(),
+      generatedBy:currentUser?{
+        uid:currentUser.uid||null,
+        name:currentUser.name||null,
+        login:currentUser.login||null,
+        role:currentUser.role||null
+      }:null,
+      localStorage:localData
+    };
+
+    const json=JSON.stringify(payload,null,2);
+    const blob=new Blob([json],{type:"application/json"});
+    const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+    const filename=`cacimba_rebanho_backup_${stamp}.json`;
+    const file=new File([blob],filename,{type:"application/json"});
+
+    if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+      try{
+        await navigator.share({
+          files:[file],
+          title:"Backup Cacimba Rebanho",
+          text:"Backup completo dos dados locais do Gestão do Rebanho."
+        });
+        alert("Backup gerado. Guarde o arquivo em local seguro e envie uma cópia para conferência.");
+        return;
+      }catch(e){
+        if(e && e.name==="AbortError") return;
+      }
+    }
+
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    alert("Backup gerado. Guarde o arquivo em local seguro e envie uma cópia para conferência.");
+  }catch(err){
+    console.error(err);
+    alert("Não foi possível gerar o backup neste aparelho.");
+  }
+}
+
 function logout(){
  sessionStorage.removeItem("cacimba_current_user");currentUser=null;
  loginPassword.value="";loginShell.classList.remove("hidden");showScreen("stock",false);
