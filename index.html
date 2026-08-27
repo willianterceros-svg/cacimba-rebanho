@@ -142,7 +142,6 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
 <section id="ageList" class="screen">
   <div class="card"><div class="muted">Total na faixa</div><div id="ageRangeTotal" style="font-size:26px;font-weight:900;color:var(--green)">0 animais</div></div>
   <div class="section-title">Filtrar por idade</div><div id="agePills" class="pills"></div>
-  <button class="btn secondary" style="margin:12px 0" onclick="toggleWeaning()">Próximos do desmame (7–9 meses)</button>
   <div id="ageFilterLabel" style="font-weight:850;margin:8px 2px"></div>
   <div class="search"><span>⌕</span><input id="ageSearch" placeholder="Buscar por identificação..." oninput="renderAgeAnimals()"></div>
   <div class="card" style="margin-top:12px"><div id="ageAnimals"></div></div>
@@ -440,6 +439,8 @@ let pendingFirstLoginUser=null;
 let cloudRevision=Number(localStorage.getItem("cacimba2_cloud_revision")||"0");
 let syncTimer=null;
 let syncBusy=false;
+let syncPending=localStorage.getItem("cacimba2_sync_pending")==="1";
+let syncChangeSeq=Number(localStorage.getItem("cacimba2_sync_seq")||"0");
 let lastSyncAt=localStorage.getItem("cacimba2_last_sync_at")||"";
 
 function roleLabel(role){return role==="OWNER"?"Proprietário":role==="ADMIN"?"Administrador":"Funcionário de campo"}
@@ -542,7 +543,7 @@ let movementEvents=JSON.parse(localStorage.getItem(DATA_PREFIX+"movement_events"
 function saveMovementEvents(){localStorage.setItem(DATA_PREFIX+"movement_events",JSON.stringify(movementEvents));queueCloudSync()}
 function addMovementEvent(ev){movementEvents.push({eventUid:"mov_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),createdAt:new Date().toISOString(),user:currentUser?.name||"Sistema",...ev});saveMovementEvents()}
 let navHistory=[];
-let currentAnimalUid=null,currentAgeSex="F",currentAgeRange="0-12",currentAgeExact=null,weaning=false,saleSelected=[];
+let currentAnimalUid=null,currentAgeSex="F",currentAgeRange="0-12",currentAgeExact=null,saleSelected=[];
 let reproducers=JSON.parse(localStorage.getItem(DATA_PREFIX+"reproducers")||"null")||[
  {uid:"rep_system",name:"Repassador múltiplo",register:"",code:"",status:"system",father:"",mother:"",pgf:"",pgm:"",mgf:"",mgm:"",source:"Padrão do sistema"},
  {uid:"rep_armador",name:"REM Armador",register:"REMC 5326",code:"",status:"linked",father:"REM Ricket",mother:"REM Ronda",pgf:"",pgm:"",mgf:"",mgm:"",source:"Cadastro demonstrativo"},
@@ -679,9 +680,35 @@ function renderSyncInfo(){const el=document.getElementById("cloudSyncInfo");if(!
 async function syncFromCloud(initial=false){
  if(!sessionToken||!navigator.onLine)return false;try{const r=await rpc("rebanho_pull_state",{p_token:sessionToken});if(!r.ok)return false;cloudRevision=Number(r.revision||0);localStorage.setItem("cacimba2_cloud_revision",String(cloudRevision));const p=r.payload||{};if(!p.herd||!Array.isArray(p.herd)||p.herd.length===0){persistLocal();await pushToCloud(true)}else{if(initial)applySnapshot(p);else applySnapshot(mergeSnapshots(p,localSnapshot()))}lastSyncAt=new Date().toISOString();localStorage.setItem("cacimba2_last_sync_at",lastSyncAt);renderSyncInfo();return true}catch(e){console.error(e);return false}}
 async function pushToCloud(force=false){
- if(syncBusy||!sessionToken||!navigator.onLine)return false;syncBusy=true;try{persistLocal();let r=await rpc("rebanho_push_state",{p_token:sessionToken,p_payload:localSnapshot(),p_base_revision:force?null:cloudRevision});if(!r.ok&&r.error==="REVISION_CONFLICT"){const merged=mergeSnapshots(r.payload||{},localSnapshot());applySnapshot(merged);cloudRevision=Number(r.revision||0);r=await rpc("rebanho_push_state",{p_token:sessionToken,p_payload:localSnapshot(),p_base_revision:cloudRevision})}if(r.ok){cloudRevision=Number(r.revision||cloudRevision);localStorage.setItem("cacimba2_cloud_revision",String(cloudRevision));lastSyncAt=new Date().toISOString();localStorage.setItem("cacimba2_last_sync_at",lastSyncAt);renderSyncInfo();return true}return false}catch(e){console.error(e);return false}finally{syncBusy=false}}
-function queueCloudSync(){persistLocal();clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushToCloud(false),500)}
-function save(){persistLocal();queueCloudSync()}
+ if(!sessionToken||!navigator.onLine)return false;
+ if(syncBusy){syncPending=true;localStorage.setItem("cacimba2_sync_pending","1");return false}
+ syncBusy=true;
+ const seqAtStart=syncChangeSeq;
+ try{
+  persistLocal();
+  let r=await rpc("rebanho_push_state",{p_token:sessionToken,p_payload:localSnapshot(),p_base_revision:force?null:cloudRevision});
+  if(!r.ok&&r.error==="REVISION_CONFLICT"){
+   const merged=mergeSnapshots(r.payload||{},localSnapshot());applySnapshot(merged);cloudRevision=Number(r.revision||0);
+   r=await rpc("rebanho_push_state",{p_token:sessionToken,p_payload:localSnapshot(),p_base_revision:cloudRevision})
+  }
+  if(r.ok){
+   cloudRevision=Number(r.revision||cloudRevision);localStorage.setItem("cacimba2_cloud_revision",String(cloudRevision));
+   lastSyncAt=new Date().toISOString();localStorage.setItem("cacimba2_last_sync_at",lastSyncAt);
+   if(syncChangeSeq===seqAtStart){syncPending=false;localStorage.removeItem("cacimba2_sync_pending")}else{syncPending=true;localStorage.setItem("cacimba2_sync_pending","1")}
+   renderSyncInfo();return true
+  }
+  syncPending=true;localStorage.setItem("cacimba2_sync_pending","1");return false
+ }catch(e){console.error(e);syncPending=true;localStorage.setItem("cacimba2_sync_pending","1");return false}
+ finally{
+  syncBusy=false;
+  if(syncPending&&sessionToken&&navigator.onLine){clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushToCloud(false),700)}
+ }
+}
+function queueCloudSync(){
+ persistLocal();syncChangeSeq++;localStorage.setItem("cacimba2_sync_seq",String(syncChangeSeq));syncPending=true;localStorage.setItem("cacimba2_sync_pending","1");
+ clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushToCloud(false),500)
+}
+function save(){queueCloudSync()}
 async function syncNow(showMessage=false){const ok=await syncFromCloud(false);if(ok)await pushToCloud(false);if(showMessage)alert(ok?"Sincronização concluída.":"Não foi possível sincronizar agora. Os dados continuam salvos neste aparelho.")}
 async function exportFullBackup(){
  try{persistLocal();const payload={app:"Agropecuária Cacimba — Gestão do Rebanho",backupVersion:3,generatedAt:new Date().toISOString(),user:currentUser||null,cloudRevision,local:localSnapshot()};if(sessionToken&&navigator.onLine){try{const r=await rpc("rebanho_pull_state",{p_token:sessionToken});if(r.ok)payload.cloud={revision:r.revision,updatedAt:r.updatedAt,payload:r.payload}}catch(e){}}
@@ -705,7 +732,7 @@ function renderStock(){
  femaleAges.innerHTML=ranges.map(r=>ageRow("F",r,f)).join("");maleAges.innerHTML=ranges.map(r=>ageRow("M",r,m)).join("");
 }
 function ageRow(sex,r,list){const n=list.filter(a=>rangeOf(a)===r[0]).length;return`<div class="row click" onclick="openAge('${sex}','${r[0]}')"><span>${r[1]}</span><span class="count">${n} ›</span></div>`}
-function openAge(sex,range){currentAgeSex=sex;currentAgeRange=range;currentAgeExact=null;weaning=false;showScreen("ageList");renderAgeScreen()}
+function openAge(sex,range){currentAgeSex=sex;currentAgeRange=range;currentAgeExact=null;showScreen("ageList");renderAgeScreen()}
 function renderAgeScreen(){
  const list=activeHerd().filter(a=>a.sex===currentAgeSex&&rangeOf(a)===currentAgeRange);ageRangeTotal.textContent=`${list.length} animais`;
  const rs=ranges.find(r=>r[0]===currentAgeRange);setHeader(`${currentAgeSex==="F"?"Fêmeas":"Machos"} • ${rs?rs[1]:""}`,"Estoque por idade");
@@ -713,14 +740,12 @@ function renderAgeScreen(){
  agePills.innerHTML=`<button class="pill ${currentAgeExact===null?"active":""}" onclick="setAge(null)">Todos</button>`+ms.map(x=>`<button class="pill ${currentAgeExact===x?"active":""}" onclick="setAge(${x})">${x}m</button>`).join("");
  renderAgeAnimals()
 }
-function setAge(m){currentAgeExact=m;weaning=false;renderAgeScreen()}
-function toggleWeaning(){weaning=!weaning;currentAgeExact=null;renderAgeAnimals()}
+function setAge(m){currentAgeExact=m;renderAgeScreen()}
 function renderAgeAnimals(){
  let list=activeHerd().filter(a=>a.sex===currentAgeSex&&rangeOf(a)===currentAgeRange);
- if(weaning)list=list.filter(a=>{const m=monthsOld(a.birth);return m>=7&&m<=9});
- else if(currentAgeExact!==null)list=list.filter(a=>monthsOld(a.birth)===currentAgeExact);
+ if(currentAgeExact!==null)list=list.filter(a=>monthsOld(a.birth)===currentAgeExact);
  const q=ageSearch.value.trim().toLowerCase();if(q)list=list.filter(a=>displayId(a).toLowerCase().includes(q));
- ageFilterLabel.textContent=weaning?`Próximos do desmame: ${list.length} animais`:currentAgeExact!==null?`Idade selecionada: ${currentAgeExact} meses • ${list.length} animais`:`${list.length} animais`;
+ ageFilterLabel.textContent=currentAgeExact!==null?`Idade selecionada: ${currentAgeExact} meses • ${list.length} animais`:`${list.length} animais`;
  ageAnimals.innerHTML=list.length?list.map(a=>`<div class="animalRow" onclick="openAnimal('${a.uid}')"><div class="sexicon" style="background:${a.sex==="F"?"var(--femaleSoft)":"var(--maleSoft)"};color:${a.sex==="F"?"var(--female)":"var(--male)"}">${a.sex==="F"?"":""}</div><div><b>${displayId(a)}</b><div class="muted">Nascimento: ${fmtDate(a.birth)}</div></div><span class="badge ${a.sex==="F"?"f":"m"}">${monthsOld(a.birth)??"?"}m</span></div>`).join(""):`<div class="center muted">Nenhum animal neste filtro.</div>`
 }
 function openAnimal(uid){currentAnimalUid=uid;showScreen("animalDetail");renderAnimalDetail()}
@@ -747,20 +772,20 @@ function renderAnimalDetail(){
 }
 function openEditAnimal(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar o cadastro do animal.");const a=herd.find(x=>x.uid===currentAnimalUid);refreshPedigreeAutocomplete();editId.value=a.id||"";editSex.value=a.sex;editBirth.value=a.birth||"";editFather.value=a.father||"";editMother.value=a.mother||"";editPGF.value=a.pgf||"";editPGM.value=a.pgm||"";editMGF.value=a.mgf||"";editMGM.value=a.mgm||"";editBreed.value=a.breed||"";editNotes.value=a.notes||"";showScreen("editAnimal")}
 function saveAnimalEdit(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const a=herd.find(x=>x.uid===currentAnimalUid),newId=editId.value.trim()||null;if(newId&&herd.some(x=>x.uid!==a.uid&&x.id&&x.id.toLowerCase()===newId.toLowerCase()))return alert("Já existe um animal com esta identificação.");const before=displayId(a);Object.assign(a,{id:newId,sex:editSex.value,birth:editBirth.value||null,father:editFather.value.trim(),mother:editMother.value.trim(),pgf:editPGF.value.trim(),pgm:editPGM.value.trim(),mgf:editMGF.value.trim(),mgm:editMGM.value.trim(),breed:editBreed.value.trim(),notes:editNotes.value.trim()});delete a.fatherReproUid;delete a.damKey;learnGenealogyFromAnimal(a,true);refreshPedigreeAutocomplete();log(`Animal ${before}: cadastro e genealogia editados${before!==displayId(a)?`; identificação alterada para ${displayId(a)}`:""}.`);save();renderStock();openAnimal(a.uid)}
-function addAnimal(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const id=newId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const a={uid:"u"+Date.now(),id,sex:newSex.value,birth:newBirth.value||null,father:newFather.value.trim(),mother:newMother.value.trim(),pgf:newPGF.value.trim(),pgm:newPGM.value.trim(),mgf:newMGF.value.trim(),mgm:newMGM.value.trim(),breed:newBreed.value.trim(),status:"ATIVO",origin:"Cadastro manual",notes:""};herd.push(a);learnGenealogyFromAnimal(a,true);refreshPedigreeAutocomplete();log(`Animal ${displayId(a)} cadastrado manualmente e incluído no estoque.`);renderStock();showScreen("stock")}
+function addAnimal(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const id=newId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const a={uid:"u"+Date.now(),id,sex:newSex.value,birth:newBirth.value||null,father:newFather.value.trim(),mother:newMother.value.trim(),pgf:newPGF.value.trim(),pgm:newPGM.value.trim(),mgf:newMGF.value.trim(),mgm:newMGM.value.trim(),breed:newBreed.value.trim(),status:"ATIVO",origin:"Cadastro manual",notes:""};herd.push(a);learnGenealogyFromAnimal(a,true);refreshPedigreeAutocomplete();log(`Animal ${displayId(a)} cadastrado manualmente e incluído no estoque.`);renderStock();save();showScreen("stock")}
 function moveTab(tab,btn){["birth","sale","death"].forEach(x=>document.getElementById(x+"Tab").classList.toggle("hidden",x!==tab));document.querySelectorAll("#moves>.tabrow .tabbtn").forEach(b=>b.classList.remove("active"));btn.classList.add("active")}
 function registerBirth(){const id=birthId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const mother=birthMother.value.trim(),date=birthDate.value;if(!date)return alert("Informe a data.");if(mother){const mom=herd.find(x=>x.id===mother&&x.sex==="F");if(mom){const children=herd.filter(x=>x.mother===mother&&x.birth).sort((a,b)=>b.birth.localeCompare(a.birth));if(children.length){const last=children[0].birth;const min=new Date(last+"T12:00:00");min.setMonth(min.getMonth()+9);const newD=new Date(date+"T12:00:00");const sameTwin=twinCheck.checked&&date===last;if(newD<min&&!sameTwin)return alert(`Nascimento bloqueado: último parto em ${fmtDate(last)}. Regra mínima de 9 meses, salvo gemelar na mesma data.`)}}}
  const selectedSire=reproducers.find(r=>normalizeReproName(r.name)===normalizeReproName(birthFather.value));
  const selectedDam=mother ? herd.find(x=>x.sex==="F"&&x.id&&normalizeReproName(x.id)===normalizeReproName(mother)) : null;
- const a={uid:"u"+Date.now(),id,sex:birthSex.value,birth:date,father:birthFather.value,mother,breed:birthBreed.value.trim(),status:"ATIVO",origin:"Nascimento",notes:"",fatherReproUid:selectedSire?.uid||null,damKey:selectedDam?("herd:"+selectedDam.uid):null};herd.push(a);addMovementEvent({type:"birth",date,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||""});log(`Nascimento registrado: ${displayId(a)}. Estoque aumentado automaticamente.`);renderStock();alert("Nascimento registrado e estoque atualizado.");birthId.value=""}
+ const a={uid:"u"+Date.now(),id,sex:birthSex.value,birth:date,father:birthFather.value,mother,breed:birthBreed.value.trim(),status:"ATIVO",origin:"Nascimento",notes:"",fatherReproUid:selectedSire?.uid||null,damKey:selectedDam?("herd:"+selectedDam.uid):null};herd.push(a);addMovementEvent({type:"birth",date,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||""});log(`Nascimento registrado: ${displayId(a)}. Estoque aumentado automaticamente.`);renderStock();save();alert("Nascimento registrado e estoque atualizado.");birthId.value=""}
 function saleMode(m){saleManual.classList.toggle("hidden",m!=="manual");saleExcel.classList.toggle("hidden",m!=="excel");saleManualBtn.classList.toggle("active",m==="manual");saleExcelBtn.classList.toggle("active",m==="excel")}
 function addSaleAnimal(){const id=saleAnimal.value.trim();if(!id)return;const a=herd.find(x=>x.id===id&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.");if(saleSelected.includes(a.uid))return alert("Animal já selecionado.");saleSelected.push(a.uid);saleAnimal.value="";renderSaleSelected()}
 function renderSaleSelected(){saleSelected.innerHTML="";document.getElementById("saleSelected").innerHTML=saleSelected.map(uid=>{const a=herd.find(x=>x.uid===uid);return`<div class="row"><span>${displayId(a)}</span><button class="icon" onclick="removeSale('${uid}')">×</button></div>`}).join("")}
 function removeSale(uid){saleSelected=saleSelected.filter(x=>x!==uid);renderSaleSelected()}
 function simulateSaleAnalysis(){saleAnalysis.classList.remove("hidden")}
-function confirmSale(){if(!saleBuyer.value.trim())return alert("Informe o comprador.");if(!saleManual.classList.contains("hidden")){if(!saleSelected.length)return alert("Selecione ao menos um animal.");const date=saleDate.value||today(),buyer=saleBuyer.value.trim();saleSelected.forEach(uid=>{const a=herd.find(x=>x.uid===uid);if(a){a.status="VENDIDO";addMovementEvent({type:"sale",date,animalUid:a.uid,id:a.id||"",sex:a.sex,buyer})}});log(`Venda para ${buyer}: ${saleSelected.length} animal(is) baixados do estoque.`);saleSelected=[];renderSaleSelected();renderStock();alert("Venda registrada e estoque atualizado.")}else{alert("Nesta prévia, o Excel de venda está em modo demonstrativo. A leitura real será ligada quando definirmos o formato da planilha.")}}
+function confirmSale(){if(!saleBuyer.value.trim())return alert("Informe o comprador.");if(!saleManual.classList.contains("hidden")){if(!saleSelected.length)return alert("Selecione ao menos um animal.");const date=saleDate.value||today(),buyer=saleBuyer.value.trim();saleSelected.forEach(uid=>{const a=herd.find(x=>x.uid===uid);if(a){a.status="VENDIDO";addMovementEvent({type:"sale",date,animalUid:a.uid,id:a.id||"",sex:a.sex,buyer})}});log(`Venda para ${buyer}: ${saleSelected.length} animal(is) baixados do estoque.`);saleSelected=[];renderSaleSelected();renderStock();save();alert("Venda registrada e estoque atualizado.")}else{alert("Nesta prévia, o Excel de venda está em modo demonstrativo. A leitura real será ligada quando definirmos o formato da planilha.")}}
 function renderDeathMode(){deathIdentified.classList.toggle("hidden",deathMode.value!=="identified");deathUnidentified.classList.toggle("hidden",deathMode.value!=="unidentified")}
-function registerDeath(){let a;if(deathMode.value==="identified"){a=herd.find(x=>x.id===deathId.value.trim()&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.")}else{a=activeHerd().find(x=>!x.id&&x.sex===deathSex.value&&rangeOf(x)===deathAge.value);if(!a)return alert("Nenhum animal sem identificação encontrado nessa combinação.")}const date=deathDate.value||today(),cause=deathCause.value;a.status="MORTO";addMovementEvent({type:"death",date,animalUid:a.uid,id:a.id||"",sex:a.sex,cause});log(`Morte registrada: ${displayId(a)} (${cause}). Animal retirado do estoque ativo.`);renderStock();alert("Morte registrada e estoque atualizado.")}
+function registerDeath(){let a;if(deathMode.value==="identified"){a=herd.find(x=>x.id===deathId.value.trim()&&x.status==="ATIVO");if(!a)return alert("Animal não encontrado no estoque ativo.")}else{a=activeHerd().find(x=>!x.id&&x.sex===deathSex.value&&rangeOf(x)===deathAge.value);if(!a)return alert("Nenhum animal sem identificação encontrado nessa combinação.")}const date=deathDate.value||today(),cause=deathCause.value;a.status="MORTO";addMovementEvent({type:"death",date,animalUid:a.uid,id:a.id||"",sex:a.sex,cause});log(`Morte registrada: ${displayId(a)} (${cause}). Animal retirado do estoque ativo.`);renderStock();save();alert("Morte registrada e estoque atualizado.")}
 
 function canonicalGenealogyName(s){
   return normalizeReproName(s)
@@ -908,8 +933,30 @@ function reportFilteredAnimals(list){const sex=document.getElementById("reportSe
 function reportInPeriod(date){const from=document.getElementById("reportDateFrom")?.value||"",to=document.getElementById("reportDateTo")?.value||"";if(!date)return !from&&!to;return(!from||date>=from)&&(!to||date<=to)}
 function reportStockRows(){return reportFilteredAnimals(activeHerd()).map(a=>{const g=resolveAnimalGenealogy(a);return {"Identificação":a.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Data de nascimento":a.birth||"","Idade (meses)":monthsOld(a.birth),"Faixa etária":reportAgeBand(monthsOld(a.birth)),"Pai":a.father||"","Mãe":a.mother||"","Avô paterno":g.pgf||"","Avó paterna":g.pgm||"","Avô materno":g.mgf||"","Avó materna":g.mgm||"","Raça":a.breed||"","Peso último manejo (kg)":a.weight??"","Origem":a.origin||"","Observações":a.notes||""}})}
 function reportSummaryRows(){const map={};reportFilteredAnimals(activeHerd()).forEach(a=>{const sexo=a.sex==="F"?"Fêmeas":a.sex==="M"?"Machos":"Não informado",faixa=reportAgeBand(monthsOld(a.birth)),key=sexo+"|"+faixa;map[key]=(map[key]||0)+1});return Object.entries(map).map(([k,v])=>{const[sexo,faixa]=k.split("|");return{"Sexo":sexo,"Faixa etária":faixa,"Quantidade":v}})}
-function reportEventRows(type){let events=movementEvents.filter(e=>e.type===type&&reportInPeriod(e.date));const seen=new Set(events.map(e=>e.animalUid).filter(Boolean));if(type==="birth"){herd.filter(a=>a.origin==="Nascimento"&&!seen.has(a.uid)&&reportInPeriod(a.birth)).forEach(a=>events.push({type:"birth",date:a.birth,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||"",user:"Registro anterior"}))}else if(!document.getElementById("reportDateFrom").value&&!document.getElementById("reportDateTo").value){const st=type==="sale"?"VENDIDO":"MORTO";herd.filter(a=>a.status===st&&!seen.has(a.uid)).forEach(a=>events.push({type,date:"",animalUid:a.uid,id:a.id||"",sex:a.sex,user:"Registro anterior"}))}
-events=events.filter(e=>{const a=herd.find(x=>x.uid===e.animalUid)||e;return reportFilteredAnimals([a]).length});return events.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(e=>type==="birth"?{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Mãe":e.mother||"","Pai":e.father||"","Raça":e.breed||"","Responsável":e.user||""}:type==="sale"?{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Comprador":e.buyer||"","Responsável":e.user||""}:{"Data":e.date||"","Identificação":e.id||"","Sexo":e.sex==="F"?"Fêmea":"Macho","Causa":e.cause||"","Responsável":e.user||""})}
+function reportEventRows(type){
+ let events=movementEvents.filter(e=>e.type===type&&reportInPeriod(e.date));
+ const seen=new Set(events.map(e=>e.animalUid).filter(Boolean));
+ if(type==="birth"){
+  herd.filter(a=>a.origin==="Nascimento"&&!seen.has(a.uid)&&reportInPeriod(a.birth)).forEach(a=>events.push({type:"birth",date:a.birth,animalUid:a.uid,id:a.id||"",sex:a.sex,mother:a.mother||"",father:a.father||"",breed:a.breed||"",user:"Registro anterior"}))
+ }else if(!document.getElementById("reportDateFrom").value&&!document.getElementById("reportDateTo").value){
+  const st=type==="sale"?"VENDIDO":"MORTO";
+  herd.filter(a=>a.status===st&&!seen.has(a.uid)).forEach(a=>events.push({type,date:"",animalUid:a.uid,id:a.id||"",sex:a.sex,user:"Registro anterior"}))
+ }
+ events=events.filter(e=>{const a=herd.find(x=>x.uid===e.animalUid)||e;return reportFilteredAnimals([a]).length});
+ return events.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(e=>{
+  const current=e.animalUid?herd.find(x=>x.uid===e.animalUid):null;
+  if(type==="birth"){
+   const a=current||e;
+   return {"Data":a.birth||e.date||"","Identificação":a.id||e.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Mãe":a.mother||"","Pai":a.father||"","Raça":a.breed||"","Responsável":e.user||""}
+  }
+  if(type==="sale"){
+   const a=current||e;
+   return {"Data":e.date||"","Identificação":a.id||e.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Comprador":e.buyer||"","Responsável":e.user||""}
+  }
+  const a=current||e;
+  return {"Data":e.date||"","Identificação":a.id||e.id||"","Sexo":a.sex==="F"?"Fêmea":a.sex==="M"?"Macho":"","Causa":e.cause||"","Responsável":e.user||""}
+ })
+}
 function reportMovementRows(){const births=reportEventRows("birth").length,sales=reportEventRows("sale").filter(r=>r.Data||(!reportDateFrom.value&&!reportDateTo.value)).length,deaths=reportEventRows("death").filter(r=>r.Data||(!reportDateFrom.value&&!reportDateTo.value)).length,current=reportFilteredAnimals(activeHerd()).length;const initial=current-births+sales+deaths;return[{"Estoque inicial estimado":initial,"Nascimentos":births,"Vendas":sales,"Mortes":deaths,"Estoque final":current}]}
 function currentReportRows(){const type=reportType.value;if(type==="stock")return reportStockRows();if(type==="summary")return reportSummaryRows();if(type==="births")return reportEventRows("birth");if(type==="sales")return reportEventRows("sale");if(type==="deaths")return reportEventRows("death");if(type==="movement")return reportMovementRows();return[]}
 function renderReportPreview(){if(!document.getElementById("reportPreview"))return;const rows=currentReportRows(),type=reportType.value;let note=`<b>${rows.length}</b> registro(s) no relatório selecionado.`;if(["sales","deaths","movement"].includes(type)&&movementEvents.length===0)note+=`<br><span class="muted">Movimentações antigas sem data estruturada aparecem apenas quando nenhum período é filtrado. Novos lançamentos passam a registrar a data corretamente.</span>`;reportPreview.innerHTML=note}
@@ -924,14 +971,14 @@ function showScreen(id,push=true){
    if(currentUser.role==="FIELD"&&["repro","addRepro","reproDetail","editRepro","users","addUser","importStock","addAnimal","editAnimal","reports"].includes(id))return alert("Seu perfil não tem acesso a este módulo.");
    if(currentUser.role==="ADMIN"&&["users","addUser"].includes(id))return alert("Somente o Proprietário pode gerenciar usuários.");
  }
- const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.style.visibility=["stock","moves","search","repro","more"].includes(id)?"hidden":"visible";document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="reports"){if(!reportDateTo.value)reportDateTo.value=today();renderReportPreview()}if(id==="users")renderUsers();if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
+ const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.style.visibility=["stock","moves","search","repro","more"].includes(id)?"hidden":"visible";document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="reports"){if(!reportDateTo.value)reportDateTo.value=today();renderReportPreview()}if(id==="users"){if(currentUser?.role==="OWNER"&&sessionToken&&navigator.onLine){usersList.innerHTML='<div class="center muted">Carregando usuários...</div>';refreshUsers()}else renderUsers()}if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
 function navTo(id,btn){navHistory=[];showScreen(id,false)}
 function goBack(){const id=navHistory.pop()||"stock";showScreen(id,false);if(id==="ageList")renderAgeScreen();if(id==="animalDetail")renderAnimalDetail()}
 stockFile.onchange=e=>stockFileName.textContent=e.target.files[0]?.name||"Nenhum arquivo selecionado";
 saleFile.onchange=e=>saleFileName.textContent=e.target.files[0]?.name||"Nenhum arquivo selecionado";
 birthMother.addEventListener("input",()=>{const id=birthMother.value.trim(),mom=herd.find(x=>x.id===id&&x.sex==="F");motherRule.textContent=mom?"Matriz localizada no estoque. A regra de intervalo mínimo entre partos será verificada ao salvar.":""});
 rebuildPedigreeLibrary();bindPedigreeAutocomplete();
-renderStock();renderReproducers();renderHistory();renderUsers();backBtn.style.visibility="hidden";persistLocal();ensureAuthorized();if(currentUser&&sessionToken&&navigator.onLine)syncFromCloud(true);
+renderStock();renderReproducers();renderHistory();renderUsers();backBtn.style.visibility="hidden";persistLocal();ensureAuthorized();if(currentUser&&sessionToken&&navigator.onLine){if(syncPending)pushToCloud(false);else syncFromCloud(true);}
 
 function updateNetStatus(){
  const online=navigator.onLine;
@@ -939,7 +986,7 @@ function updateNetStatus(){
  netStatus.className="netstatus "+(online?"online":"offline");
  setTimeout(()=>{if(online)netStatus.style.opacity=".45";else netStatus.style.opacity="1"},1200);
 }
-window.addEventListener("online",()=>{updateNetStatus();if(currentUser&&sessionToken)syncNow(false)});
+window.addEventListener("online",async()=>{updateNetStatus();if(currentUser&&sessionToken){if(syncPending)await pushToCloud(false);await syncNow(false)}});
 window.addEventListener("offline",updateNetStatus);
 updateNetStatus();
 if("serviceWorker" in navigator){
