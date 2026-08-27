@@ -178,7 +178,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
     <label>Observações</label><textarea id="editNotes"></textarea>
   </div>
   
-<div class="card"><div class="notice"><b>Genealogia conhecida</b><br>Preencha apenas as informações que você conhece. Os campos podem ser completados ou corrigidos posteriormente.</div></div>
+<div class="card"><div class="notice"><b>Genealogia conhecida</b><br>Ao começar a digitar Pai ou Mãe, o sistema sugere nomes já conhecidos. Ao selecionar uma sugestão, os avós correspondentes são preenchidos automaticamente quando estiverem em branco. Os dados ficam disponíveis offline após a sincronização.</div></div>
 <button class="btn primary" onclick="saveAnimalEdit()">Salvar alterações</button>
 </section>
 
@@ -590,7 +590,72 @@ migrateReproducers();
 let currentReproUid=null,reproMenuUid=null;
 
 let historicalDams=JSON.parse(localStorage.getItem(DATA_PREFIX+"historical_dams")||"[]");
+let pedigreeLibrary=JSON.parse(localStorage.getItem(DATA_PREFIX+"pedigree_library")||"[]");
 function saveHistoricalDams(){localStorage.setItem(DATA_PREFIX+"historical_dams",JSON.stringify(historicalDams));queueCloudSync()}
+
+function escapeHtml(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function pedigreeKey(name){return normalizeReproName(name)}
+function pedigreeStamp(){return new Date().toISOString()}
+function upsertPedigreeEntry(name,data={},overwrite=false,source="Cadastro interno"){
+ const clean=(name||"").trim();if(!clean)return null;
+ const key=pedigreeKey(clean);if(!key)return null;
+ let e=pedigreeLibrary.find(x=>x.key===key);
+ if(!e){e={key,name:clean,sex:data.sex||"",father:"",mother:"",source,updatedAt:pedigreeStamp()};pedigreeLibrary.push(e)}
+ const setField=(field,value)=>{const v=(value||"").trim();if(v&&(overwrite||!e[field]))e[field]=v};
+ if(clean&&(overwrite||!e.name))e.name=clean;
+ if(data.sex&&(overwrite||!e.sex))e.sex=data.sex;
+ setField("father",data.father);setField("mother",data.mother);
+ if(overwrite||!e.source)e.source=source;
+ if(overwrite||data.father||data.mother)e.updatedAt=pedigreeStamp();
+ return e
+}
+function learnGenealogyFromAnimal(a,overwrite=false){
+ if(!a)return;
+ // O próprio animal passa a ser uma referência genealógica quando tem identificação.
+ if(a.id&&(a.father||a.mother))upsertPedigreeEntry(a.id,{sex:a.sex||"",father:a.father||"",mother:a.mother||""},overwrite,`Ficha do animal ${a.id}`);
+ // Os pais também entram na biblioteca usando os avós informados na ficha.
+ if(a.father&&(a.pgf||a.pgm))upsertPedigreeEntry(a.father,{sex:"M",father:a.pgf||"",mother:a.pgm||""},overwrite,`Genealogia informada em ${a.id||"animal sem identificação"}`);
+ if(a.mother&&(a.mgf||a.mgm))upsertPedigreeEntry(a.mother,{sex:"F",father:a.mgf||"",mother:a.mgm||""},overwrite,`Genealogia informada em ${a.id||"animal sem identificação"}`);
+}
+function learnGenealogyFromReproducer(r,overwrite=false){
+ if(!r||!r.name)return;
+ upsertPedigreeEntry(r.name,{sex:"M",father:r.father||"",mother:r.mother||""},overwrite,`Cadastro de reprodutor ${r.name}`);
+ if(r.father&&(r.pgf||r.pgm))upsertPedigreeEntry(r.father,{sex:"M",father:r.pgf||"",mother:r.pgm||""},overwrite,`Genealogia do reprodutor ${r.name}`);
+ if(r.mother&&(r.mgf||r.mgm))upsertPedigreeEntry(r.mother,{sex:"F",father:r.mgf||"",mother:r.mgm||""},overwrite,`Genealogia do reprodutor ${r.name}`);
+}
+function rebuildPedigreeLibrary(){
+ if(!Array.isArray(pedigreeLibrary))pedigreeLibrary=[];
+ herd.forEach(a=>learnGenealogyFromAnimal(a,false));
+ reproducers.forEach(r=>learnGenealogyFromReproducer(r,false));
+ historicalDams.forEach(a=>{if((a.id||a.name)&&(a.father||a.mother))upsertPedigreeEntry(a.id||a.name,{sex:"F",father:a.father||"",mother:a.mother||""},false,"Matriz histórica")});
+}
+function mergePedigreeLibraries(remote=[],local=[]){
+ const m=new Map();
+ [...remote,...local].forEach(e=>{if(!e)return;const key=e.key||pedigreeKey(e.name);if(!key)return;const cur=m.get(key);if(!cur){m.set(key,{...e,key});return}const a=Date.parse(cur.updatedAt||0)||0,b=Date.parse(e.updatedAt||0)||0;const newer=b>=a?e:cur,older=b>=a?cur:e;m.set(key,{...older,...newer,key,father:newer.father||older.father||"",mother:newer.mother||older.mother||""})});
+ return [...m.values()]
+}
+function findPedigreeEntry(name,sex=""){
+ const key=pedigreeKey(name);if(!key)return null;
+ const exact=pedigreeLibrary.filter(e=>e.key===key&&(!sex||!e.sex||e.sex===sex));
+ if(exact.length===1)return exact[0];
+ return exact[0]||null
+}
+function ensurePedigreeDatalists(){
+ const defs=[["pedigreeMaleList","M"],["pedigreeFemaleList","F"],["pedigreeAllList",""]];
+ defs.forEach(([id,sex])=>{let dl=document.getElementById(id);if(!dl){dl=document.createElement("datalist");dl.id=id;document.body.appendChild(dl)}const entries=pedigreeLibrary.filter(e=>!sex||!e.sex||e.sex===sex).sort((a,b)=>(a.name||"").localeCompare(b.name||"","pt-BR"));dl.innerHTML=entries.map(e=>`<option value="${escapeHtml(e.name||"")}">${escapeHtml([e.father,e.mother].filter(Boolean).join(" × "))}</option>`).join("")});
+ [["editFather","pedigreeMaleList"],["newFather","pedigreeMaleList"],["reproFather","pedigreeMaleList"],["erFather","pedigreeMaleList"],["editMother","pedigreeFemaleList"],["newMother","pedigreeFemaleList"],["reproMother","pedigreeFemaleList"],["erMother","pedigreeFemaleList"]].forEach(([id,list])=>{const el=document.getElementById(id);if(el)el.setAttribute("list",list)});
+}
+function autocompleteParent(input,gfInput,gmInput,sex){
+ if(!input||!gfInput||!gmInput)return;const hit=findPedigreeEntry(input.value,sex);if(!hit)return;
+ if(hit.name&&input.value.trim()!==hit.name)input.value=hit.name;
+ if(!gfInput.value.trim()&&hit.father)gfInput.value=hit.father;
+ if(!gmInput.value.trim()&&hit.mother)gmInput.value=hit.mother;
+}
+function bindPedigreeAutocomplete(){
+ ensurePedigreeDatalists();
+ [["editFather","editPGF","editPGM","M"],["editMother","editMGF","editMGM","F"],["newFather","newPGF","newPGM","M"],["newMother","newMGF","newMGM","F"],["reproFather","reproPGF","reproPGM","M"],["reproMother","reproMGF","reproMGM","F"],["erFather","erPGF","erPGM","M"],["erMother","erMGF","erMGM","F"]].forEach(([a,b,c,sex])=>{const input=document.getElementById(a),gf=document.getElementById(b),gm=document.getElementById(c);if(!input||input.dataset.pedigreeBound)return;input.dataset.pedigreeBound="1";input.addEventListener("input",()=>autocompleteParent(input,gf,gm,sex));input.addEventListener("change",()=>autocompleteParent(input,gf,gm,sex));input.addEventListener("blur",()=>autocompleteParent(input,gf,gm,sex))});
+}
+function refreshPedigreeAutocomplete(){rebuildPedigreeLibrary();ensurePedigreeDatalists()}
 function allDamOptions(){
  const herdDams=herd.filter(a=>a.sex==="F").map(a=>({key:"herd:"+a.uid,label:(a.id||"Sem identificação")+" — "+(a.status||"Ativa"),type:"herd",animal:a}));
  const hist=historicalDams.map(a=>({key:"hist:"+a.uid,label:(a.id||a.name||"Matriz histórica")+" — histórica",type:"hist",animal:a}));
@@ -603,13 +668,13 @@ function findDamByKey(key){
 function findReproByUid(uid){return reproducers.find(r=>r.uid===uid)}
 
 
-function localSnapshot(){return {schemaVersion:2,herd,history,reproducers,movementEvents,historicalDams}}
+function localSnapshot(){return {schemaVersion:3,herd,history,reproducers,movementEvents,historicalDams,pedigreeLibrary}}
 function persistLocal(){
- localStorage.setItem(DATA_PREFIX+"herd",JSON.stringify(herd));localStorage.setItem(DATA_PREFIX+"history",JSON.stringify(history));localStorage.setItem(DATA_PREFIX+"reproducers",JSON.stringify(reproducers));localStorage.setItem(DATA_PREFIX+"movement_events",JSON.stringify(movementEvents));localStorage.setItem(DATA_PREFIX+"historical_dams",JSON.stringify(historicalDams));
+ localStorage.setItem(DATA_PREFIX+"herd",JSON.stringify(herd));localStorage.setItem(DATA_PREFIX+"history",JSON.stringify(history));localStorage.setItem(DATA_PREFIX+"reproducers",JSON.stringify(reproducers));localStorage.setItem(DATA_PREFIX+"movement_events",JSON.stringify(movementEvents));localStorage.setItem(DATA_PREFIX+"historical_dams",JSON.stringify(historicalDams));localStorage.setItem(DATA_PREFIX+"pedigree_library",JSON.stringify(pedigreeLibrary));
 }
-function applySnapshot(p){if(!p||typeof p!=="object")return;if(Array.isArray(p.herd))herd=p.herd;if(Array.isArray(p.history))history=p.history;if(Array.isArray(p.reproducers))reproducers=p.reproducers;if(Array.isArray(p.movementEvents))movementEvents=p.movementEvents;if(Array.isArray(p.historicalDams))historicalDams=p.historicalDams;persistLocal();renderStock();renderReproducers();renderHistory()}
+function applySnapshot(p){if(!p||typeof p!=="object")return;if(Array.isArray(p.herd))herd=p.herd;if(Array.isArray(p.history))history=p.history;if(Array.isArray(p.reproducers))reproducers=p.reproducers;if(Array.isArray(p.movementEvents))movementEvents=p.movementEvents;if(Array.isArray(p.historicalDams))historicalDams=p.historicalDams;if(Array.isArray(p.pedigreeLibrary))pedigreeLibrary=mergePedigreeLibraries(p.pedigreeLibrary,pedigreeLibrary);rebuildPedigreeLibrary();persistLocal();renderStock();renderReproducers();renderHistory();ensurePedigreeDatalists()}
 function mergeByKey(remote,local,key){const m=new Map();(remote||[]).forEach(x=>m.set(x?.[key]||JSON.stringify(x),x));(local||[]).forEach(x=>m.set(x?.[key]||JSON.stringify(x),x));return [...m.values()]}
-function mergeSnapshots(remote,local){return {schemaVersion:2,herd:mergeByKey(remote.herd,local.herd,"uid"),history:mergeByKey(remote.history,local.history,"msg"),reproducers:mergeByKey(remote.reproducers,local.reproducers,"uid"),movementEvents:mergeByKey(remote.movementEvents,local.movementEvents,"eventUid"),historicalDams:mergeByKey(remote.historicalDams,local.historicalDams,"uid")}}
+function mergeSnapshots(remote,local){return {schemaVersion:3,herd:mergeByKey(remote.herd,local.herd,"uid"),history:mergeByKey(remote.history,local.history,"msg"),reproducers:mergeByKey(remote.reproducers,local.reproducers,"uid"),movementEvents:mergeByKey(remote.movementEvents,local.movementEvents,"eventUid"),historicalDams:mergeByKey(remote.historicalDams,local.historicalDams,"uid"),pedigreeLibrary:mergePedigreeLibraries(remote.pedigreeLibrary,local.pedigreeLibrary)}}
 function renderSyncInfo(){const el=document.getElementById("cloudSyncInfo");if(!el)return;const when=lastSyncAt?new Date(lastSyncAt).toLocaleString("pt-BR"):"ainda não sincronizado";el.innerHTML=`<b>${navigator.onLine?"Online":"Offline"}</b><br>Última sincronização: ${when}<br><span class="muted">Lançamentos offline ficam neste aparelho e são enviados quando a internet voltar.</span>`}
 async function syncFromCloud(initial=false){
  if(!sessionToken||!navigator.onLine)return false;try{const r=await rpc("rebanho_pull_state",{p_token:sessionToken});if(!r.ok)return false;cloudRevision=Number(r.revision||0);localStorage.setItem("cacimba2_cloud_revision",String(cloudRevision));const p=r.payload||{};if(!p.herd||!Array.isArray(p.herd)||p.herd.length===0){persistLocal();await pushToCloud(true)}else{if(initial)applySnapshot(p);else applySnapshot(mergeSnapshots(p,localSnapshot()))}lastSyncAt=new Date().toISOString();localStorage.setItem("cacimba2_last_sync_at",lastSyncAt);renderSyncInfo();return true}catch(e){console.error(e);return false}}
@@ -619,7 +684,7 @@ function queueCloudSync(){persistLocal();clearTimeout(syncTimer);syncTimer=setTi
 function save(){persistLocal();queueCloudSync()}
 async function syncNow(showMessage=false){const ok=await syncFromCloud(false);if(ok)await pushToCloud(false);if(showMessage)alert(ok?"Sincronização concluída.":"Não foi possível sincronizar agora. Os dados continuam salvos neste aparelho.")}
 async function exportFullBackup(){
- try{persistLocal();const payload={app:"Agropecuária Cacimba — Gestão do Rebanho",backupVersion:2,generatedAt:new Date().toISOString(),user:currentUser||null,cloudRevision,local:localSnapshot()};if(sessionToken&&navigator.onLine){try{const r=await rpc("rebanho_pull_state",{p_token:sessionToken});if(r.ok)payload.cloud={revision:r.revision,updatedAt:r.updatedAt,payload:r.payload}}catch(e){}}
+ try{persistLocal();const payload={app:"Agropecuária Cacimba — Gestão do Rebanho",backupVersion:3,generatedAt:new Date().toISOString(),user:currentUser||null,cloudRevision,local:localSnapshot()};if(sessionToken&&navigator.onLine){try{const r=await rpc("rebanho_pull_state",{p_token:sessionToken});if(r.ok)payload.cloud={revision:r.revision,updatedAt:r.updatedAt,payload:r.payload}}catch(e){}}
  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),stamp=new Date().toISOString().replace(/[:.]/g,"-"),filename=`cacimba_rebanho_backup_${stamp}.json`,file=new File([blob],filename,{type:"application/json"});
  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:"Backup Cacimba Rebanho"});return}catch(e){if(e?.name==="AbortError")return}}
  const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000)}catch(e){alert("Não foi possível gerar o backup.")}
@@ -680,9 +745,9 @@ function renderAnimalDetail(){
  detailOrigin.textContent=a.origin||"—";
  detailNotes.textContent=a.notes||"—";
 }
-function openEditAnimal(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar o cadastro do animal.");const a=herd.find(x=>x.uid===currentAnimalUid);editId.value=a.id||"";editSex.value=a.sex;editBirth.value=a.birth||"";editFather.value=a.father||"";editMother.value=a.mother||"";editPGF.value=a.pgf||"";editPGM.value=a.pgm||"";editMGF.value=a.mgf||"";editMGM.value=a.mgm||"";editBreed.value=a.breed||"";editNotes.value=a.notes||"";showScreen("editAnimal")}
-function saveAnimalEdit(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const a=herd.find(x=>x.uid===currentAnimalUid),newId=editId.value.trim()||null;if(newId&&herd.some(x=>x.uid!==a.uid&&x.id&&x.id.toLowerCase()===newId.toLowerCase()))return alert("Já existe um animal com esta identificação.");const before=displayId(a);Object.assign(a,{id:newId,sex:editSex.value,birth:editBirth.value||null,father:editFather.value.trim(),mother:editMother.value.trim(),pgf:editPGF.value.trim(),pgm:editPGM.value.trim(),mgf:editMGF.value.trim(),mgm:editMGM.value.trim(),breed:editBreed.value.trim(),notes:editNotes.value.trim()});delete a.fatherReproUid;delete a.damKey;log(`Animal ${before}: cadastro e genealogia editados${before!==displayId(a)?`; identificação alterada para ${displayId(a)}`:""}.`);save();renderStock();openAnimal(a.uid)}
-function addAnimal(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const id=newId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const a={uid:"u"+Date.now(),id,sex:newSex.value,birth:newBirth.value||null,father:newFather.value.trim(),mother:newMother.value.trim(),pgf:newPGF.value.trim(),pgm:newPGM.value.trim(),mgf:newMGF.value.trim(),mgm:newMGM.value.trim(),breed:newBreed.value.trim(),status:"ATIVO",origin:"Cadastro manual",notes:""};herd.push(a);log(`Animal ${displayId(a)} cadastrado manualmente e incluído no estoque.`);renderStock();showScreen("stock")}
+function openEditAnimal(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar o cadastro do animal.");const a=herd.find(x=>x.uid===currentAnimalUid);refreshPedigreeAutocomplete();editId.value=a.id||"";editSex.value=a.sex;editBirth.value=a.birth||"";editFather.value=a.father||"";editMother.value=a.mother||"";editPGF.value=a.pgf||"";editPGM.value=a.pgm||"";editMGF.value=a.mgf||"";editMGM.value=a.mgm||"";editBreed.value=a.breed||"";editNotes.value=a.notes||"";showScreen("editAnimal")}
+function saveAnimalEdit(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const a=herd.find(x=>x.uid===currentAnimalUid),newId=editId.value.trim()||null;if(newId&&herd.some(x=>x.uid!==a.uid&&x.id&&x.id.toLowerCase()===newId.toLowerCase()))return alert("Já existe um animal com esta identificação.");const before=displayId(a);Object.assign(a,{id:newId,sex:editSex.value,birth:editBirth.value||null,father:editFather.value.trim(),mother:editMother.value.trim(),pgf:editPGF.value.trim(),pgm:editPGM.value.trim(),mgf:editMGF.value.trim(),mgm:editMGM.value.trim(),breed:editBreed.value.trim(),notes:editNotes.value.trim()});delete a.fatherReproUid;delete a.damKey;learnGenealogyFromAnimal(a,true);refreshPedigreeAutocomplete();log(`Animal ${before}: cadastro e genealogia editados${before!==displayId(a)?`; identificação alterada para ${displayId(a)}`:""}.`);save();renderStock();openAnimal(a.uid)}
+function addAnimal(){if(currentUser?.role==="FIELD")return alert("Sem permissão.");const id=newId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const a={uid:"u"+Date.now(),id,sex:newSex.value,birth:newBirth.value||null,father:newFather.value.trim(),mother:newMother.value.trim(),pgf:newPGF.value.trim(),pgm:newPGM.value.trim(),mgf:newMGF.value.trim(),mgm:newMGM.value.trim(),breed:newBreed.value.trim(),status:"ATIVO",origin:"Cadastro manual",notes:""};herd.push(a);learnGenealogyFromAnimal(a,true);refreshPedigreeAutocomplete();log(`Animal ${displayId(a)} cadastrado manualmente e incluído no estoque.`);renderStock();showScreen("stock")}
 function moveTab(tab,btn){["birth","sale","death"].forEach(x=>document.getElementById(x+"Tab").classList.toggle("hidden",x!==tab));document.querySelectorAll("#moves>.tabrow .tabbtn").forEach(b=>b.classList.remove("active"));btn.classList.add("active")}
 function registerBirth(){const id=birthId.value.trim()||null;if(id&&herd.some(x=>x.id&&x.id.toLowerCase()===id.toLowerCase()))return alert("Identificação já cadastrada.");const mother=birthMother.value.trim(),date=birthDate.value;if(!date)return alert("Informe a data.");if(mother){const mom=herd.find(x=>x.id===mother&&x.sex==="F");if(mom){const children=herd.filter(x=>x.mother===mother&&x.birth).sort((a,b)=>b.birth.localeCompare(a.birth));if(children.length){const last=children[0].birth;const min=new Date(last+"T12:00:00");min.setMonth(min.getMonth()+9);const newD=new Date(date+"T12:00:00");const sameTwin=twinCheck.checked&&date===last;if(newD<min&&!sameTwin)return alert(`Nascimento bloqueado: último parto em ${fmtDate(last)}. Regra mínima de 9 meses, salvo gemelar na mesma data.`)}}}
  const selectedSire=reproducers.find(r=>normalizeReproName(r.name)===normalizeReproName(birthFather.value));
@@ -809,13 +874,14 @@ function renderReproDetail(){
 function openReproEdit(){
  if(currentUser?.role==="FIELD")return alert("Sem permissão.");
  const r=reproducers.find(x=>x.uid===currentReproUid);if(!r)return;
+ refreshPedigreeAutocomplete();
  erName.value=r.name;erRegister.value=r.register||"";erCode.value=r.code||"";erFather.value=r.father||"";erMother.value=r.mother||"";erPGF.value=r.pgf||"";erPGM.value=r.pgm||"";erMGF.value=r.mgf||"";erMGM.value=r.mgm||"";showScreen("editRepro")
 }
 function saveReproEdit(){
  if(currentUser?.role==="FIELD")return alert("Sem permissão.");
  const r=reproducers.find(x=>x.uid===currentReproUid);if(!r)return;
  const old=r.name;r.name=erName.value.trim()||r.name;r.register=erRegister.value.trim();r.code=erCode.value.trim();r.father=erFather.value.trim();r.mother=erMother.value.trim();r.pgf=erPGF.value.trim();r.pgm=erPGM.value.trim();r.mgf=erMGF.value.trim();r.mgm=erMGM.value.trim();r.status=(r.father||r.mother||r.register||r.code)?(r.status==="linked"?"linked":"manual"):"notfound";r.source=r.status==="linked"?r.source:"Cadastro editado manualmente";
- log(`Reprodutor ${old} editado.`);save();renderReproducers();openReproDetail(r.uid)
+ learnGenealogyFromReproducer(r,true);refreshPedigreeAutocomplete();log(`Reprodutor ${old} editado.`);save();renderReproducers();openReproDetail(r.uid)
 }
 function catalogLookup(name){
  const key=normalizeReproName(name);return verifiedReproCatalog[key]||null
@@ -834,7 +900,7 @@ function addReproducer(){
  const name=reproName.value.trim();if(!name)return alert("Informe o nome.");
  if(reproducers.some(r=>normalizeReproName(r.name)===normalizeReproName(name)))return alert("Esse reprodutor já está cadastrado.");
  const r={uid:"rep_"+Date.now(),name,register:reproRegister.value.trim(),code:reproCode.value.trim(),status:(reproFather.value.trim()||reproMother.value.trim()||reproRegister.value.trim())?"manual":"notfound",father:reproFather.value.trim(),mother:reproMother.value.trim(),pgf:reproPGF.value.trim(),pgm:reproPGM.value.trim(),mgf:reproMGF.value.trim(),mgm:reproMGM.value.trim(),source:"Preenchimento manual"};
- reproducers.push(r);log(`Reprodutor ${name} cadastrado.`);save();renderReproducers();showScreen("repro")
+ reproducers.push(r);learnGenealogyFromReproducer(r,true);refreshPedigreeAutocomplete();log(`Reprodutor ${name} cadastrado.`);save();renderReproducers();showScreen("repro")
 }
 
 function reportAgeBand(months){if(months===null)return"Idade não informada";if(months<12)return"0–12 meses";if(months<24)return"12–24 meses";if(months<36)return"24–36 meses";return"36+ meses"}
@@ -864,6 +930,7 @@ function goBack(){const id=navHistory.pop()||"stock";showScreen(id,false);if(id=
 stockFile.onchange=e=>stockFileName.textContent=e.target.files[0]?.name||"Nenhum arquivo selecionado";
 saleFile.onchange=e=>saleFileName.textContent=e.target.files[0]?.name||"Nenhum arquivo selecionado";
 birthMother.addEventListener("input",()=>{const id=birthMother.value.trim(),mom=herd.find(x=>x.id===id&&x.sex==="F");motherRule.textContent=mom?"Matriz localizada no estoque. A regra de intervalo mínimo entre partos será verificada ao salvar.":""});
+rebuildPedigreeLibrary();bindPedigreeAutocomplete();
 renderStock();renderReproducers();renderHistory();renderUsers();backBtn.style.visibility="hidden";persistLocal();ensureAuthorized();if(currentUser&&sessionToken&&navigator.onLine)syncFromCloud(true);
 
 function updateNetStatus(){
@@ -878,7 +945,7 @@ updateNetStatus();
 if("serviceWorker" in navigator){
  window.addEventListener("load",async()=>{
   try{
-   const reg=await navigator.serviceWorker.register("./sw.js?v=20260824-cloud-v1",{updateViaCache:"none"});
+   const reg=await navigator.serviceWorker.register("./sw.js?v=20260827-pedigree-v1",{updateViaCache:"none"});
    await reg.update();
   }catch(e){}
  });

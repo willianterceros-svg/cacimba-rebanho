@@ -1,4 +1,4 @@
-const CACHE_NAME = "cacimba-rebanho-v20260824-cloud-v1";
+const CACHE_NAME = "cacimba-rebanho-v20260827-pedigree-v1";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {
