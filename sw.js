@@ -1,4 +1,4 @@
-const CACHE_NAME = "cacimba-rebanho-v20260827-remove-weaning-v7";
+const CACHE_NAME = "cacimba-rebanho-v20260827-auditoria-v8";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {
