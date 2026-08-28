@@ -72,6 +72,14 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
 .lookup-results{margin-top:12px}.lookup-card{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:9px;background:#fff}
 .lookup-card h4{margin:0 0 6px;color:var(--green)}.lookup-card small{color:var(--muted)}
 
+.repro-history-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #edf0ee}
+.repro-history-summary:last-child{border-bottom:0}.repro-history-count{font-size:24px;font-weight:900;color:var(--green)}
+.repro-history-head,.repro-history-row{display:grid;grid-template-columns:1.15fr .9fr .8fr 1fr;gap:7px;align-items:center}
+.repro-history-head{padding:8px 10px;background:var(--soft);border-radius:10px;font-size:11px;font-weight:900;color:var(--green);text-transform:uppercase}
+.repro-history-row{padding:11px 10px;border-bottom:1px solid #edf0ee;font-size:12px}.repro-history-row:last-child{border-bottom:0}
+.repro-history-row b{font-size:12px}.repro-history-note{margin-top:11px;font-size:12px;color:var(--muted);line-height:1.4}
+@media(max-width:390px){.repro-history-head,.repro-history-row{grid-template-columns:1.1fr .9fr .75fr 1fr;font-size:10px;gap:5px;padding-left:6px;padding-right:6px}.repro-history-row b{font-size:11px}}
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -268,6 +276,12 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
       <div class="treeBranch"><div class="treeTitle">Linha paterna</div><div class="parentCard m"><b>Pai</b><div id="srFather"></div></div><div class="grand"><div class="parentCard m"><b>Avô paterno</b><div id="srPGF"></div></div><div class="parentCard f"><b>Avó paterna</b><div id="srPGM"></div></div></div></div>
       <div class="treeBranch"><div class="treeTitle">Linha materna</div><div class="parentCard f"><b>Mãe</b><div id="srMother"></div></div><div class="grand"><div class="parentCard m"><b>Avô materno</b><div id="srMGF"></div></div><div class="parentCard f"><b>Avó materna</b><div id="srMGM"></div></div></div></div>
       <button id="searchEditGenealogyBtn" class="btn primary" style="margin-top:12px" onclick="editGenealogyFromSearch()">Editar genealogia</button>
+    </div>
+    <div id="reproductiveHistoryCard" class="card hidden">
+      <div class="section-title" style="margin-top:0">Histórico reprodutivo</div>
+      <div class="repro-history-summary"><div><div class="muted">Crias registradas no sistema</div><div id="rhCalfCount" class="repro-history-count">0</div></div><div style="text-align:right"><div class="muted">Intervalo médio entre partos</div><b id="rhAverageInterval">—</b></div></div>
+      <div id="rhBirthList" style="margin-top:12px"></div>
+      <div class="repro-history-note">Considerados apenas os nascimentos registrados no sistema.</div>
     </div>
   </div>
   <div id="searchNotFound" class="card hidden center muted">Animal não encontrado na base local.</div>
@@ -876,6 +890,39 @@ function migrateLegacyGenealogyLinks(){
   if(changed) save();
 }
 
+function registeredBirthRecords(){
+ const byUid=new Map();
+ movementEvents.filter(e=>e.type==="birth"&&e.animalUid).forEach(e=>byUid.set(e.animalUid,{uid:e.animalUid,id:e.id||"",sex:e.sex||"",birth:e.date||"",mother:e.mother||"",father:e.father||"",breed:e.breed||"",origin:"Nascimento"}));
+ herd.filter(a=>a.origin==="Nascimento").forEach(a=>byUid.set(a.uid,a));
+ return [...byUid.values()];
+}
+function dayDiffISO(a,b){
+ const da=new Date(a+"T12:00:00"),db=new Date(b+"T12:00:00");
+ return Math.round((db-da)/86400000);
+}
+function renderReproductiveHistory(a){
+ const card=document.getElementById("reproductiveHistoryCard");
+ if(!card)return;
+ const eligible=a&&a.sex==="F"&&String(a.id||"").trim();
+ card.classList.toggle("hidden",!eligible);
+ if(!eligible)return;
+ const damKey=normalizeReproName(a.id);
+ const calves=registeredBirthRecords().filter(c=>c.birth&&c.mother&&normalizeReproName(c.mother)===damKey).sort((x,y)=>(x.birth||"").localeCompare(y.birth||"")||String(x.id||"").localeCompare(String(y.id||""),"pt-BR"));
+ rhCalfCount.textContent=calves.length;
+ const uniqueDates=[...new Set(calves.map(c=>c.birth))].sort();
+ const intervals=[];
+ for(let i=1;i<uniqueDates.length;i++){const d=dayDiffISO(uniqueDates[i-1],uniqueDates[i]);if(Number.isFinite(d)&&d>=0)intervals.push(d)}
+ rhAverageInterval.textContent=intervals.length?`${Math.round(intervals.reduce((s,n)=>s+n,0)/intervals.length)} dias`:"—";
+ if(!calves.length){rhBirthList.innerHTML='<div class="center muted" style="padding:10px 0">Nenhuma cria registrada no sistema para esta fêmea.</div>';return}
+ let lastParturitionDate="";
+ rhBirthList.innerHTML='<div class="repro-history-head"><span>Data</span><span>Cria</span><span>Sexo</span><span>Intervalo</span></div>'+calves.map(c=>{
+   let interval="—";
+   if(lastParturitionDate){interval=c.birth===lastParturitionDate?"Mesmo parto":`${dayDiffISO(lastParturitionDate,c.birth)} dias`}
+   if(c.birth!==lastParturitionDate)lastParturitionDate=c.birth;
+   return `<div class="repro-history-row"><span>${fmtDate(c.birth)}</span><b>${escapeHtml(c.id||"Sem identificação")}</b><span>${c.sex==="F"?"Fêmea":c.sex==="M"?"Macho":"—"}</span><span>${interval}</span></div>`
+ }).join("");
+}
+
 function searchIndividual(){
  const q=individualSearch.value.trim().toLowerCase();
  const a=herd.find(x=>x.id&&x.id.toLowerCase()===q);
@@ -893,6 +940,7 @@ function searchIndividual(){
  srPGM.textContent=g.pgm||"Não informada";
  srMGF.textContent=g.mgf||"Não informado";
  srMGM.textContent=g.mgm||"Não informada";
+ renderReproductiveHistory(a);
  applyPermissions();
 }
 function editGenealogyFromSearch(){if(currentUser?.role==="FIELD")return alert("Funcionário de campo não pode editar a genealogia.");if(!currentAnimalUid)return alert("Pesquise um animal primeiro.");openEditAnimal()}
