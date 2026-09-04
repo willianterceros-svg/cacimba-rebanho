@@ -77,7 +77,7 @@ async function resumeSession() {
 }
 function logout() {
   sessionStorage.removeItem("cacimba2_current_user"); sessionStorage.removeItem("cacimba2_session_token");
-  currentUser = null; sessionToken = ""; clearLoadedData();
+  currentUser = null; sessionToken = ""; clearLoadedData(); renderAccountAvatar();
   loginPassword.value = ""; appShell.classList.add("hidden"); loginShell.classList.remove("hidden");
 }
 function ensureAuthorized() { return currentUser ? resumeSession() : Promise.resolve(false); }
@@ -88,11 +88,31 @@ function applyPermissions() {
   set("stockAdminActions", owner || admin); set("accountUsersBtn", owner); set("searchEditGenealogyBtn", owner || admin); set("importBackupBtn", owner);
   if (field && ["repro", "addRepro", "reproDetail", "editRepro", "users", "addUser", "importStock", "addAnimal", "editAnimal"].includes(document.querySelector(".screen.active")?.id)) showScreen("stock", false);
 }
+function userInitials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (first + last).toUpperCase();
+}
+function renderAccountAvatar() {
+  const initials = currentUser ? userInitials(currentUser.name) : "";
+  accountBtn.className = `avatar-btn ${currentUser ? roleClass(currentUser.role) : ""}`.trim();
+  if (initials) {
+    accountBtn.textContent = initials;
+    accountBtn.title = `${currentUser.name} — ${roleLabel(currentUser.role)}`;
+  } else {
+    const icon = document.createElement("i"); icon.dataset.lucide = "user-round";
+    accountBtn.replaceChildren(icon); renderIcons();
+    accountBtn.title = "Minha conta";
+  }
+  accountBtn.setAttribute("aria-label", currentUser ? `Minha conta — ${currentUser.name}` : "Minha conta");
+}
 function renderAccount() {
   if (!currentUser) return;
   accountName.textContent = currentUser.name; accountLogin.textContent = `Usuário: ${currentUser.login}`;
   accountRole.replaceChildren(); const badge = document.createElement("span"); badge.className = `user-chip ${roleClass(currentUser.role)}`; badge.textContent = roleLabel(currentUser.role); accountRole.append(badge);
-  renderSyncInfo();
+  renderAccountAvatar(); renderSyncInfo();
 }
 async function refreshUsers() {
   if (!currentUser || currentUser.role !== "OWNER" || !sessionToken || !navigator.onLine) { renderUsers(); return; }

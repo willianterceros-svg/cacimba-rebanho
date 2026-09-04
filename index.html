@@ -9,8 +9,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cacimba Rebanho">
 <title>Agropecuária Cacimba — Gestão do Rebanho</title>
-<link rel="stylesheet" href="./assets/css/app.css">
+<link rel="stylesheet" href="./assets/css/app.css?v=3.2.7">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.40.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
 
@@ -53,13 +54,15 @@
   </div>
 </div>
 
-<div id="netStatus" class="netstatus online">Online</div>
 <div id="appShell" class="app hidden">
 <header class="topbar">
   <div class="toprow">
-    <button id="backBtn" class="icon" onclick="goBack()">‹</button>
-    <div><h1 id="title">Estoque do Rebanho</h1><div id="subtitle" class="subhead">Agropecuária Cacimba</div></div>
-    <button id="accountBtn" class="icon" onclick="showScreen('account')">●</button>
+    <button id="backBtn" class="icon" onclick="goBack()" aria-label="Voltar" title="Voltar"><i data-lucide="chevron-left"></i></button>
+    <div class="topcenter">
+      <h1 id="title">Estoque do Rebanho</h1>
+      <div class="subhead"><span id="subtitle">Agropecuária Cacimba</span><span id="netStatus" class="netstatus online"><i></i>Online</span></div>
+    </div>
+    <button id="accountBtn" class="avatar-btn" onclick="showScreen('account')" aria-label="Minha conta" title="Minha conta"><i data-lucide="user-round"></i></button>
   </div>
 </header>
 
@@ -67,19 +70,22 @@
 <section id="stock" class="screen active">
   <div class="card hero"><small>Estoque atual</small><div id="totalStock" class="big">0</div><b>animais ativos</b></div>
   <div class="split">
-    <div class="card sexcard female"><div class="sexicon"></div><div><small>Fêmeas</small><div id="femaleTotal" style="font-size:22px;font-weight:900">0</div></div></div>
-    <div class="card sexcard male"><div class="sexicon"></div><div><small>Machos</small><div id="maleTotal" style="font-size:22px;font-weight:900">0</div></div></div>
+    <div class="card sexcard female"><div class="sexicon" aria-hidden="true"><i data-lucide="venus"></i></div><div><small>Fêmeas</small><div id="femaleTotal" style="font-size:22px;font-weight:900">0</div></div></div>
+    <div class="card sexcard male"><div class="sexicon" aria-hidden="true"><i data-lucide="mars"></i></div><div><small>Machos</small><div id="maleTotal" style="font-size:22px;font-weight:900">0</div></div></div>
   </div>
   <div id="unidentifiedNotice" class="notice" style="margin-bottom:12px"></div>
   <div class="section-title femaleText">Fêmeas</div><div id="femaleAges" class="rows"></div>
   <div class="section-title maleText">Machos</div><div id="maleAges" class="rows"></div>
-  <div id="stockAdminActions" style="margin-top:14px"><button class="btn primary" onclick="showScreen('addAnimal')">+ Cadastrar animal</button><button class="btn secondary" onclick="showScreen('importStock')">Importar planilha Excel</button></div>
+  <div id="stockAdminActions" style="margin-top:14px"><button class="btn primary" onclick="showScreen('addAnimal')"><i data-lucide="plus"></i>Cadastrar animal</button><button class="btn secondary" onclick="showScreen('importStock')">Importar planilha Excel</button></div>
 </section>
 
 <section id="ageList" class="screen">
   <div class="card"><div class="muted">Total na faixa</div><div id="ageRangeTotal" style="font-size:26px;font-weight:900;color:var(--green)">0 animais</div></div>
-  <div class="section-title">Filtrar por idade</div><div id="agePills" class="pills"></div>
-  <div id="ageFilterLabel" style="font-weight:850;margin:8px 2px"></div>
+  <div class="age-filter">
+    <div class="section-title age-filter-title">Filtrar por idade</div>
+    <div id="agePills" class="pills age-pills"></div>
+    <div id="ageFilterLabel" class="age-filter-label"></div>
+  </div>
   <div class="search"><span>⌕</span><input id="ageSearch" placeholder="Buscar por identificação..." oninput="renderAgeAnimals()"></div>
   <div class="card" style="margin-top:12px"><div id="ageAnimals"></div></div>
 </section>
@@ -147,7 +153,7 @@
 </section>
 
 <section id="moves" class="screen">
-  <div class="tabrow"><button class="tabbtn active" onclick="moveTab('birth',this)">Nascimento</button><button class="tabbtn" onclick="moveTab('sale',this)">Venda</button><button class="tabbtn" onclick="moveTab('death',this)">Morte</button></div>
+  <div class="tabrow movement-tabs"><button class="tabbtn active" onclick="moveTab('birth',this)">Nascimento</button><button class="tabbtn" onclick="moveTab('sale',this)">Venda</button><button class="tabbtn" onclick="moveTab('death',this)">Morte</button></div>
 
   <div id="birthTab">
     <div class="card">
@@ -198,7 +204,7 @@
 </section>
 
 <section id="search" class="screen">
-  <div class="card"><div class="search"><span>⌕</span><input id="individualSearch" placeholder="Digite o brinco. Ex.: 2458"><button class="icon" onclick="searchIndividual()">→</button></div><div class="statusline ok">● Pesquisa disponível offline neste aparelho</div></div>
+  <div class="card"><form class="search individual-search" onsubmit="event.preventDefault();searchIndividual()"><input id="individualSearch" aria-label="Identificação do animal" placeholder="Digite o brinco. Ex.: 2458"><button type="submit" class="search-submit" aria-label="Buscar animal"><span>Buscar</span><i data-lucide="search" aria-hidden="true"></i></button></form><div class="statusline ok">● Pesquisa disponível offline neste aparelho</div></div>
   <div id="searchResult" class="hidden">
     <div class="card center"><div id="srId" style="display:inline-block;background:var(--green);color:#fff;border-radius:13px;padding:10px 22px;font-size:26px;font-weight:900"></div><div id="srSexAge" style="margin:9px 0;font-weight:900;color:var(--green)"></div><div id="srMeta" class="muted"></div></div>
     <div class="card"><div class="section-title" style="margin-top:0">Genealogia</div>
@@ -312,24 +318,25 @@
     <div id="accountRole" style="margin-top:12px"></div>
   </div>
   <div class="card"><div class="section-title" style="margin-top:0">Sincronização e segurança</div><div id="cloudSyncInfo" class="notice">Aguardando sincronização...</div></div>
-  <button id="accountUsersBtn" class="btn secondary" onclick="showScreen('users')">Gerenciar usuários</button>
-  <button class="btn secondary" onclick="syncNow(true)">Sincronizar agora</button>
-  
-  <button class="btn secondary" onclick="exportFullBackup()">Baixar backup JSON</button>
-  <input id="backupJsonFile" class="hidden" type="file" accept="application/json,.json" onchange="showSelectedBackup()">
-  <button id="importBackupBtn" class="btn secondary" onclick="chooseBackupFile()">Importar backup JSON</button>
-  <div id="backupImportInfo" class="notice hidden" style="margin-top:10px"></div>
-  <button class="btn danger" onclick="logout()">Sair</button>
+  <div class="account-actions">
+    <button id="accountUsersBtn" class="btn secondary" onclick="showScreen('users')">Gerenciar usuários</button>
+    <button class="btn secondary" onclick="syncNow(true)">Sincronizar agora</button>
+    <button class="btn secondary" onclick="exportFullBackup()">Baixar backup JSON</button>
+    <input id="backupJsonFile" class="hidden" type="file" accept="application/json,.json" onchange="showSelectedBackup()">
+    <button id="importBackupBtn" class="btn secondary" onclick="chooseBackupFile()">Importar backup JSON</button>
+    <div id="backupImportInfo" class="notice hidden"></div>
+    <button class="btn danger" onclick="logout()">Sair</button>
+  </div>
 </section>
 
 <section id="more" class="screen">
   <div class="card"><div class="section-title" style="margin-top:0">Mais opções</div>
     <div class="rows">
-      <div id="moreReproRow" class="row click" onclick="showScreen('repro')"><span>Cadastro de reprodutores</span><b>›</b></div>
-      <div class="row click" onclick="showScreen('history')"><span>Histórico de alterações</span><b>›</b></div>
-      <div id="moreImportRow" class="row click" onclick="showScreen('importStock')"><span>Importar estoque inicial</span><b>›</b></div>
-      <div id="moreReportsRow" class="row click" onclick="showScreen('reports')"><span>Relatórios</span><b>›</b></div>
-      <div id="moreUsersRow" class="row click" onclick="showScreen('users')"><span>Cadastro de usuários</span><b>›</b></div>
+      <button id="moreReproRow" type="button" class="row click" onclick="showScreen('repro')"><span>Cadastro de reprodutores</span><span class="rowRight"><span class="chev"><i data-lucide="chevron-right"></i></span></span></button>
+      <button type="button" class="row click" onclick="showScreen('history')"><span>Histórico de alterações</span><span class="rowRight"><span class="chev"><i data-lucide="chevron-right"></i></span></span></button>
+      <button id="moreImportRow" type="button" class="row click" onclick="showScreen('importStock')"><span>Importar estoque inicial</span><span class="rowRight"><span class="chev"><i data-lucide="chevron-right"></i></span></span></button>
+      <button id="moreReportsRow" type="button" class="row click" onclick="showScreen('reports')"><span>Relatórios</span><span class="rowRight"><span class="chev"><i data-lucide="chevron-right"></i></span></span></button>
+      <button id="moreUsersRow" type="button" class="row click" onclick="showScreen('users')"><span>Cadastro de usuários</span><span class="rowRight"><span class="chev"><i data-lucide="chevron-right"></i></span></span></button>
     </div>
   </div>
 </section>
@@ -369,11 +376,11 @@
 </main>
 
 <nav class="bottom">
-  <button class="nav active" data-target="stock" onclick="navTo('stock',this)"><span>▣</span>Estoque</button>
-  <button class="nav" data-target="moves" onclick="navTo('moves',this)"><span></span>Movimentações</button>
-  <button class="nav" data-target="search" onclick="navTo('search',this)"><span>⌕</span>Pesquisa</button>
-  <button id="navRepro" class="nav" data-target="repro" onclick="navTo('repro',this)"><span></span>Reprodutores</button>
-  <button class="nav" data-target="more" onclick="navTo('more',this)"><span></span>Mais</button>
+  <button class="nav active" data-target="stock" onclick="navTo('stock',this)"><span><i data-lucide="warehouse"></i></span>Estoque</button>
+  <button class="nav" data-target="moves" onclick="navTo('moves',this)"><span><i data-lucide="arrow-left-right"></i></span>Movimentações</button>
+  <button class="nav" data-target="search" onclick="navTo('search',this)"><span><i data-lucide="search"></i></span>Pesquisa</button>
+  <button id="navRepro" class="nav" data-target="repro" onclick="navTo('repro',this)"><span><i data-lucide="mars"></i></span>Reprodutores</button>
+  <button class="nav" data-target="more" onclick="navTo('more',this)"><span><i data-lucide="menu"></i></span>Mais</button>
 </nav>
 </div>
 
@@ -385,7 +392,7 @@
 <script src="./src/sync.js"></script>
 <script src="./src/auth.js"></script>
 <script src="./src/genealogy.js"></script>
-<script src="./src/ui.js"></script>
+<script src="./src/ui.js?v=3.2.7"></script>
 <script src="./src/backup.js"></script>
 <script src="./src/bootstrap.js"></script>
 </body>

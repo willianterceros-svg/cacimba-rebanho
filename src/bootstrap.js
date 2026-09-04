@@ -17,10 +17,15 @@ function refreshAllViews() {
   if (document.querySelector(".screen.active")?.id === "ageList") renderAgeScreen();
   if (document.querySelector(".screen.active")?.id === "reports") renderReportPreview();
 }
+function renderIcons(root = document) {
+  if (window.lucide?.createIcons) lucide.createIcons({ nameAttr: "data-lucide", root });
+}
 function updateNetStatus() {
-  netStatus.textContent = navigator.onLine ? "Online" : "Offline";
-  netStatus.className = `netstatus ${navigator.onLine ? "online" : "offline"}`;
-  setTimeout(() => { netStatus.style.opacity = navigator.onLine ? ".45" : "1"; }, 1200);
+  const online = navigator.onLine;
+  const dot = document.createElement("i");
+  netStatus.replaceChildren(dot, document.createTextNode(online ? "Online" : "Offline"));
+  netStatus.className = `netstatus ${online ? "online" : "offline"}`;
+  netStatus.title = online ? "Conectado — dados sincronizados" : "Sem conexão — alterações salvas no aparelho";
 }
 async function bootstrap() {
   refreshAutomaticDates();
@@ -29,8 +34,9 @@ async function bootstrap() {
   saleFile.onchange = event => { saleFileName.textContent = event.target.files[0]?.name || "Nenhum arquivo selecionado"; };
   birthMother.addEventListener("input", () => { const mother = herd.find(animal => animal.id === birthMother.value.trim() && animal.sex === "F"); motherRule.textContent = mother ? "Matriz localizada no estoque. A regra de intervalo mínimo entre partos será verificada ao salvar." : ""; });
   loginPassword.addEventListener("keydown", event => { if (event.key === "Enter") doLogin(); });
+  renderIcons();
   await RebanhoData.open();
-  appShell.classList.add("hidden"); backBtn.style.visibility = "hidden"; updateNetStatus();
+  appShell.classList.add("hidden"); backBtn.hidden = true; updateNetStatus();
   if (currentUser) await resumeSession(); else loginShell.classList.remove("hidden");
 }
 window.addEventListener("online", async () => { updateNetStatus(); if (currentUser && sessionToken) await RebanhoSync.run({ silent: true }); });

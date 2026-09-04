@@ -14,7 +14,9 @@ function renderStock(){
  unidentifiedNotice.append(unidentifiedTitle,document.createElement("br"),unidentifiedText);
  femaleAges.replaceChildren(...ranges.map(r=>ageRow("F",r,f)));maleAges.replaceChildren(...ranges.map(r=>ageRow("M",r,m)));
 }
-function ageRow(sex,r,list){const n=list.filter(a=>rangeOf(a)===r[0]).length,row=document.createElement("div"),label=document.createElement("span"),count=document.createElement("span");row.className="row click";row.addEventListener("click",()=>openAge(sex,r[0]));label.textContent=r[1];count.className="count";count.textContent=`${n} ›`;row.append(label,count);return row}
+const chevronTemplate=(()=>{const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox","0 0 24 24");svg.setAttribute("fill","none");svg.setAttribute("stroke","currentColor");svg.setAttribute("stroke-width","2.5");svg.setAttribute("stroke-linecap","round");svg.setAttribute("stroke-linejoin","round");svg.setAttribute("aria-hidden","true");const path=document.createElementNS("http://www.w3.org/2000/svg","path");path.setAttribute("d","m9 18 6-6-6-6");svg.appendChild(path);return svg})();
+function chevronIcon(){const span=document.createElement("span");span.className="chev";span.appendChild(chevronTemplate.cloneNode(true));return span}
+function ageRow(sex,r,list){const n=list.filter(a=>rangeOf(a)===r[0]).length,row=document.createElement("button"),label=document.createElement("span"),right=document.createElement("span"),count=document.createElement("span");row.type="button";row.className="row click";row.addEventListener("click",()=>openAge(sex,r[0]));label.textContent=r[1];right.className="rowRight";count.className="count";count.textContent=n;right.append(count,chevronIcon());row.append(label,right);return row}
 function openAge(sex,range){currentAgeSex=sex;currentAgeRange=range;currentAgeExact=null;showScreen("ageList");renderAgeScreen()}
 function renderAgeScreen(){
  const list=activeHerd().filter(a=>a.sex===currentAgeSex&&rangeOf(a)===currentAgeRange);ageRangeTotal.textContent=`${list.length} animais`;
@@ -34,7 +36,7 @@ function renderAgeAnimals(){
  if(!list.length){const empty=document.createElement("div");empty.className="center muted";empty.textContent="Nenhum animal neste filtro.";ageAnimals.append(empty);return}
  list.forEach(a=>{
   const row=document.createElement("div");row.className="animalRow";row.onclick=()=>openAnimal(a.uid);
-  const icon=document.createElement("div");icon.className="sexicon";icon.style.background=a.sex==="F"?"var(--femaleSoft)":"var(--maleSoft)";icon.style.color=a.sex==="F"?"var(--female)":"var(--male)";
+  const icon=document.createElement("div"),sexGlyph=document.createElement("i");icon.className=`sexicon ${a.sex==="F"?"female":"male"}`;icon.setAttribute("aria-hidden","true");sexGlyph.setAttribute("data-lucide",a.sex==="F"?"venus":"mars");icon.append(sexGlyph);renderIcons(icon);
   const copy=document.createElement("div"),id=document.createElement("b"),birth=document.createElement("div");id.textContent=displayId(a);birth.className="muted";birth.textContent=`Nascimento: ${fmtDate(a.birth)}`;copy.append(id,birth);
   const badge=document.createElement("span");badge.className=`badge ${a.sex==="F"?"f":"m"}`;badge.textContent=`${monthsOld(a.birth)??"?"}m`;row.append(icon,copy,badge);ageAnimals.append(row)
  })
@@ -44,7 +46,7 @@ function renderAnimalDetail(){
  const a=herd.find(x=>x.uid===currentAnimalUid);if(!a)return;
  const g=resolveAnimalGenealogy(a);
  setHeader("Ficha do Animal","Cadastro individual");
- detailSexIcon.textContent="";
+ detailSexIcon.textContent=a.sex==="F"?"♀":"♂";
  detailSexIcon.style.color=a.sex==="F"?"var(--female)":"var(--male)";
  detailId.textContent=displayId(a);
  detailSexAge.textContent=`${a.sex==="F"?"Fêmea":"Macho"} • ${ageText(a)}`;
@@ -341,6 +343,6 @@ function showScreen(id,push=true){
    if(currentUser.role==="FIELD"&&["repro","addRepro","reproDetail","editRepro","users","addUser","importStock","addAnimal","editAnimal","reports"].includes(id))return alert("Seu perfil não tem acesso a este módulo.");
    if(currentUser.role==="ADMIN"&&["users","addUser"].includes(id))return alert("Somente o Proprietário pode gerenciar usuários.");
  }
- const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.style.visibility=["stock","moves","search","repro","more"].includes(id)?"hidden":"visible";document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="reports"){if(!reportDateTo.value)reportDateTo.value=today();renderReportPreview()}if(id==="users"){if(currentUser?.role==="OWNER"&&sessionToken&&navigator.onLine){const loading=document.createElement("div");loading.className="center muted";loading.textContent="Carregando usuários...";usersList.replaceChildren(loading);refreshUsers()}else renderUsers()}if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
+ const cur=document.querySelector(".screen.active")?.id;if(push&&cur&&cur!==id)navHistory.push(cur);document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));const l=labels[id]||[title.textContent,subtitle.textContent];setHeader(l[0],l[1]);backBtn.hidden=["stock","moves","search","repro","more"].includes(id);document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.target===id));window.scrollTo(0,0);if(id==="stock")renderStock();if(id==="repro")renderReproducers();if(id==="history")renderHistory();if(id==="reports"){if(!reportDateTo.value)reportDateTo.value=today();renderReportPreview()}if(id==="users"){if(currentUser?.role==="OWNER"&&sessionToken&&navigator.onLine){const loading=document.createElement("div");loading.className="center muted";loading.textContent="Carregando usuários...";usersList.replaceChildren(loading);refreshUsers()}else renderUsers()}if(id==="account")renderAccount();if(id==="reproDetail")renderReproDetail();applyPermissions()}
 function navTo(id,btn){navHistory=[];showScreen(id,false)}
 function goBack(){const id=navHistory.pop()||"stock";showScreen(id,false);if(id==="ageList")renderAgeScreen();if(id==="animalDetail")renderAnimalDetail()}
