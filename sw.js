@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "cacimba-ajustada-";
-const CACHE_NAME = `${CACHE_PREFIX}3.2.7`;
+const CACHE_NAME = `${CACHE_PREFIX}3.2.10`;
 const XLSX_URL = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
 const LUCIDE_URL = "https://cdn.jsdelivr.net/npm/lucide@1.40.0/dist/umd/lucide.min.js";
 const CDN_URLS = [XLSX_URL, LUCIDE_URL];

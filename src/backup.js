@@ -25,12 +25,15 @@ function validateBackup(value) {
     }
   };
 }
+function backupCountsText(counts = {}) {
+  return `${counts.animals || 0} animais, ${counts.movements || 0} movimentações, ${counts.reproducers || 0} reprodutores, ${counts.history || 0} históricos e ${counts.pedigree || 0} genealogias`;
+}
 async function showSelectedBackup() {
   const file = backupJsonFile.files[0]; if (!file) return;
   backupImportInfo.classList.remove("hidden");
   try {
     const json = JSON.parse(await file.text()), validated = validateBackup(json), counts = validated.counts;
-    backupImportInfo.textContent = `${counts.animals} animais, ${counts.movements} movimentações, ${counts.reproducers} reprodutores, ${counts.history} históricos e ${counts.pedigree} genealogias.`;
+    backupImportInfo.textContent = `${backupCountsText(counts)}.`;
     if (!sessionToken || !navigator.onLine) return alert("A importação na nuvem exige uma sessão online.");
     const localStatus = await RebanhoData.status();
     if (localStatus.pending) return alert("Sincronize os lançamentos pendentes antes de importar o backup.");
@@ -40,7 +43,7 @@ async function showSelectedBackup() {
     if (!result?.ok) throw new Error(result?.error || "Importação recusada pelo banco");
     await RebanhoData.setMeta("sync_cursor", 0);
     await RebanhoSync.run({ silent: false });
-    backupImportInfo.textContent = `Importação concluída e conferida: ${JSON.stringify(result.counts)}.`;
+    backupImportInfo.textContent = `Importação concluída e conferida: ${backupCountsText(result.counts)}.`;
   } catch (error) {
     console.error(error); backupImportInfo.textContent = `Falha: ${error.message}`; alert("O backup não foi importado. Nenhuma importação parcial deve ser considerada válida.");
   }

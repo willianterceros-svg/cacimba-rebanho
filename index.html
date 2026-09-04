@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cacimba Rebanho">
 <title>Agropecuária Cacimba — Gestão do Rebanho</title>
-<link rel="stylesheet" href="./assets/css/app.css?v=3.2.7">
+<link rel="stylesheet" href="./assets/css/app.css?v=3.2.10">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lucide@1.40.0/dist/umd/lucide.min.js"></script>
 </head>
@@ -23,10 +23,14 @@
     <label>Usuário</label>
     <input id="loginUser" autocomplete="username" placeholder="Digite seu usuário">
     <label>Senha</label>
-    <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha">
+    <div class="password-field">
+      <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha">
+      <button type="button" class="password-toggle" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="Mostrar senha" aria-pressed="false" title="Mostrar senha"><i data-lucide="eye"></i></button>
+    </div>
     <button class="btn primary" style="margin-top:16px" onclick="doLogin()">Entrar</button>
     <div id="loginError" class="login-error"></div>
   </div>
+  <div class="login-version">Versão 3.2.10</div>
 </div>
 
 <div id="firstPasswordShell" class="login-shell hidden">
@@ -390,10 +394,10 @@
 <script src="./src/database.js"></script>
 <script src="./src/state.js"></script>
 <script src="./src/sync.js"></script>
-<script src="./src/auth.js"></script>
+<script src="./src/auth.js?v=3.2.10"></script>
 <script src="./src/genealogy.js"></script>
 <script src="./src/ui.js?v=3.2.7"></script>
-<script src="./src/backup.js"></script>
+<script src="./src/backup.js?v=3.2.8"></script>
 <script src="./src/bootstrap.js"></script>
 </body>
 </html>
