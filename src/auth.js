@@ -1,6 +1,16 @@
 function roleLabel(role) { return role === "OWNER" ? "Proprietário" : role === "ADMIN" ? "Administrador" : "Funcionário de campo"; }
 function roleClass(role) { return role === "OWNER" ? "role-owner" : role === "ADMIN" ? "role-admin" : "role-field"; }
 
+function togglePasswordVisibility(inputId, button) {
+  const input = document.getElementById(inputId); if (!input || !button) return;
+  const shouldShow = input.type === "password";
+  input.type = shouldShow ? "text" : "password";
+  const label = shouldShow ? "Ocultar senha" : "Mostrar senha";
+  button.setAttribute("aria-label", label); button.setAttribute("aria-pressed", String(shouldShow)); button.title = label;
+  const icon = document.createElement("i"); icon.dataset.lucide = shouldShow ? "eye-off" : "eye";
+  button.replaceChildren(icon); renderIcons(button);
+}
+
 async function sha256Text(value) {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(bytes)).map(byte => byte.toString(16).padStart(2, "0")).join("");
