@@ -25,7 +25,14 @@ function updateNetStatus() {
   const dot = document.createElement("i");
   netStatus.replaceChildren(dot, document.createTextNode(online ? "Online" : "Offline"));
   netStatus.className = `netstatus ${online ? "online" : "offline"}`;
-  netStatus.title = online ? "Conectado — dados sincronizados" : "Sem conexão — alterações salvas no aparelho";
+  netStatus.title = online ? "Conectado à internet" : "Sem conexão — alterações salvas no aparelho";
+}
+function syncWhenActive() {
+  const activeScreen = document.querySelector(".screen.active")?.id || "";
+  if (!currentUser || !sessionToken || !navigator.onLine || document.visibilityState === "hidden") return;
+  // Evita atualizar a base enquanto um cadastro existente está aberto para edição.
+  if (["editAnimal", "editRepro"].includes(activeScreen)) return;
+  return RebanhoSync.runAutomatic({ silent: true }).catch(error => console.error("Falha na sincronização automática", error));
 }
 async function bootstrap() {
   refreshAutomaticDates();
@@ -39,12 +46,14 @@ async function bootstrap() {
   appShell.classList.add("hidden"); backBtn.hidden = true; updateNetStatus();
   if (currentUser) await resumeSession(); else loginShell.classList.remove("hidden");
 }
-window.addEventListener("online", async () => { updateNetStatus(); if (currentUser && sessionToken) await RebanhoSync.run({ silent: true }); });
+window.addEventListener("online", () => { updateNetStatus(); syncWhenActive(); });
 window.addEventListener("offline", () => { updateNetStatus(); renderSyncInfo(); });
-window.addEventListener("pageshow", refreshAutomaticDates);
+window.addEventListener("pageshow", () => { refreshAutomaticDates(); syncWhenActive(); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden" && currentUser) RebanhoData.captureNow()?.catch(error => console.error("Falha ao concluir salvamento local", error));
+  if (document.visibilityState === "visible") syncWhenActive();
 });
+setInterval(syncWhenActive, REBANHO_CONFIG.syncIntervalMs);
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).catch(error => console.warn("Service worker não registrado", error)));
 }

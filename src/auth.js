@@ -75,7 +75,7 @@ async function startSession(user, loadCloud = true) {
   loginShell.classList.add("hidden"); firstPasswordShell.classList.add("hidden"); appShell.classList.remove("hidden");
   applySnapshot(await RebanhoData.loadAfterLogin());
   migrateReproducers(); rebuildPedigreeLibrary(); bindPedigreeAutocomplete();
-  if (loadCloud && sessionToken && navigator.onLine) await RebanhoSync.run({ silent: true });
+  if (loadCloud && sessionToken && navigator.onLine) await RebanhoSync.runAutomatic({ silent: true });
   applyPermissions(); renderAccount(); refreshAllViews(); showScreen("stock", false);
   if (currentUser.role === "OWNER") await refreshUsers();
 }
