@@ -2,23 +2,26 @@ function normalizeReproName(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 function migrateReproducers() {
-  reproducers = reproducers.map((item, index) => ({
-    uid: item.uid || `rep_${Date.now()}_${index}`, name: item.name || "", register: item.register || "", code: item.code || "",
-    status: item.status || "manual", father: item.father || "", mother: item.mother || "", pgf: item.pgf || "",
-    pgm: item.pgm || "", mgf: item.mgf || "", mgm: item.mgm || "", source: item.source || "Preenchimento manual"
-  }));
+  // Registros atuais já chegam normalizados do banco. Para dados realmente
+  // legados, preenche somente o UID indispensável sem reordenar ou regravar
+  // todas as demais propriedades durante uma simples leitura.
+  reproducers = reproducers.map((item, index) => item.uid ? item : { ...item, uid: `rep_${Date.now()}_${index}` });
 }
 function pedigreeKey(name) { return normalizeReproName(name); }
 function upsertPedigreeEntry(name, data = {}, overwrite = false, source = "Cadastro interno") {
   const clean = String(name || "").trim(), key = pedigreeKey(clean); if (!key) return null;
   let entry = pedigreeLibrary.find(item => item.key === key);
-  if (!entry) { entry = { key, name: clean, sex: data.sex || "", father: "", mother: "", source, updatedAt: new Date().toISOString() }; pedigreeLibrary.push(entry); }
-  const set = (field, value) => { const cleanValue = String(value || "").trim(); if (cleanValue && (overwrite || !entry[field])) entry[field] = cleanValue; };
-  if (overwrite || !entry.name) entry.name = clean;
-  if (data.sex && (overwrite || !entry.sex)) entry.sex = data.sex;
+  let changed = false;
+  if (!entry) { entry = { key, name: "", sex: "", father: "", mother: "", source: "", updatedAt: "" }; pedigreeLibrary.push(entry); changed = true; }
+  const set = (field, value) => {
+    const cleanValue = String(value || "").trim();
+    if (cleanValue && (overwrite || !entry[field]) && entry[field] !== cleanValue) { entry[field] = cleanValue; changed = true; }
+  };
+  if ((overwrite || !entry.name) && entry.name !== clean) { entry.name = clean; changed = true; }
+  if (data.sex && (overwrite || !entry.sex) && entry.sex !== data.sex) { entry.sex = data.sex; changed = true; }
   set("father", data.father); set("mother", data.mother);
-  if (overwrite || !entry.source) entry.source = source;
-  if (overwrite || data.father || data.mother) entry.updatedAt = new Date().toISOString();
+  if ((overwrite || !entry.source) && entry.source !== source) { entry.source = source; changed = true; }
+  if (changed) entry.updatedAt = new Date().toISOString();
   return entry;
 }
 function learnGenealogyFromAnimal(animal, overwrite = false) {

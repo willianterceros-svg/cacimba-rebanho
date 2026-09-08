@@ -62,6 +62,17 @@ const RebanhoData = (() => {
     delete data._version; delete data._updatedAt; delete data._deletedAt;
     return data;
   }
+  function canonicalize(value) {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (!value || typeof value !== "object") return value;
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = canonicalize(value[key]);
+      return result;
+    }, {});
+  }
+  function sameData(left, right) {
+    return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+  }
   function ensureUid(entity, item) {
     const definition = entities[entity];
     if (item?.[definition.key]) return String(item[definition.key]);
@@ -121,7 +132,7 @@ const RebanhoData = (() => {
       for (const item of items) {
         const uid = ensureUid(entity, item), data = cleanData(item), previous = baselines[entity].get(uid);
         currentIds.add(uid);
-        if (previous && JSON.stringify(previous.data) === JSON.stringify(data) && !previous.deleted_at) continue;
+        if (previous && sameData(previous.data, data) && !previous.deleted_at) continue;
         const version = Number(previous?.version || 0) + 1;
         const record = { uid, data, version, updated_at: new Date().toISOString(), deleted_at: null };
         recordsToSave.push({ store: definition.store, record });
@@ -184,5 +195,5 @@ const RebanhoData = (() => {
     return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
   }
 
-  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, applyRemoteChanges, replaceFromImportedSnapshot, status };
+  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData };
 })();

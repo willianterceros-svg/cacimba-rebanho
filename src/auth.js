@@ -74,7 +74,7 @@ async function startSession(user, loadCloud = true) {
   sessionStorage.setItem("cacimba2_current_user", JSON.stringify(currentUser));
   loginShell.classList.add("hidden"); firstPasswordShell.classList.add("hidden"); appShell.classList.remove("hidden");
   applySnapshot(await RebanhoData.loadAfterLogin());
-  migrateReproducers(); rebuildPedigreeLibrary(); migrateLegacyGenealogyLinks(); bindPedigreeAutocomplete();
+  migrateReproducers(); rebuildPedigreeLibrary(); bindPedigreeAutocomplete();
   if (loadCloud && sessionToken && navigator.onLine) await RebanhoSync.run({ silent: true });
   applyPermissions(); renderAccount(); refreshAllViews(); showScreen("stock", false);
   if (currentUser.role === "OWNER") await refreshUsers();
