@@ -177,10 +177,14 @@ const RebanhoData = (() => {
     const db = await open(), tx = db.transaction("outbox", "readwrite"); tx.objectStore("outbox").delete(id); await transactionPromise(tx);
   }
   async function resolveOutboxBatch(batch, nextChanges, resolvedRecords) {
-    const validRecords = (resolvedRecords || []).filter(item => entities[item.entity] && item.record);
+    const validRecords = (resolvedRecords || []).filter(item => entities[item.entity] && (item.record || (item.remove && item.uid)));
     const stores = [...new Set(["outbox", ...validRecords.map(item => entities[item.entity].store)])];
     const db = await open(), tx = db.transaction(stores, "readwrite");
-    for (const item of validRecords) tx.objectStore(entities[item.entity].store).put(item.record);
+    for (const item of validRecords) {
+      const store = tx.objectStore(entities[item.entity].store);
+      if (item.remove) store.delete(String(item.uid));
+      else store.put(item.record);
+    }
     if (nextChanges.length) {
       tx.objectStore("outbox").put({
         ...batch, changes: nextChanges, conflict: false, conflicts: [], lastError: "",
@@ -190,7 +194,10 @@ const RebanhoData = (() => {
       tx.objectStore("outbox").delete(batch.id);
     }
     await transactionPromise(tx);
-    for (const item of validRecords) baselines[item.entity].set(item.record.uid, structuredClone(item.record));
+    for (const item of validRecords) {
+      if (item.remove) baselines[item.entity].delete(String(item.uid));
+      else baselines[item.entity].set(item.record.uid, structuredClone(item.record));
+    }
   }
   async function applyRemoteChanges(changes) {
     if (!changes?.length) return;

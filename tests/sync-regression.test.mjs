@@ -119,6 +119,38 @@ test("classificação não sobrescreve mudanças divergentes no mesmo campo", ()
   assert.deepEqual([...result.fields], ["father"]);
 });
 
+test("revisão manual mantém a escolha local e incorpora os outros campos da nuvem", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`(() => {
+    const change = { entity: "animals", operation: "update", uid: "animal_1", baseVersion: 1,
+      baseData: { father: null, notes: "original" }, data: { father: "Touro A", notes: "original" } };
+    const classification = RebanhoSync.classifyChange(change, {
+      base: { version: 1, data: { father: null, notes: "original" } },
+      server: { uid: "animal_1", version: 2, data: { father: "Touro B", notes: "nuvem" }, deleted_at: null }
+    });
+    return RebanhoSync.resolveManualChange(change, classification, [{ field: "father", choice: "local" }]);
+  })()`, context);
+
+  assert.equal(result.keep.baseVersion, 2);
+  assert.equal(result.keep.data.father, "Touro A");
+  assert.equal(result.keep.data.notes, "nuvem");
+});
+
+test("revisão manual aceita um novo valor informado na interface", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`(() => {
+    const change = { entity: "animals", operation: "update", uid: "animal_1", baseVersion: 1,
+      baseData: { father: null }, data: { father: "Touro A" } };
+    const classification = RebanhoSync.classifyChange(change, {
+      base: { version: 1, data: { father: null } },
+      server: { uid: "animal_1", version: 2, data: { father: "Touro B" }, deleted_at: null }
+    });
+    return RebanhoSync.resolveManualChange(change, classification, [{ field: "father", choice: "custom", value: "Touro C" }]);
+  })()`, context);
+
+  assert.equal(result.keep.data.father, "Touro C");
+});
+
 test("sincronização automática tenta resolver conflitos e busca novidades periodicamente", () => {
   const sync = read("src/sync.js");
   const database = read("src/database.js");
