@@ -245,7 +245,11 @@ async function resolveSyncConflicts() {
       if (info) info.textContent = "Conflito real preservado. Campos que exigem revisão: " + preview + remaining + ".";
       alert("Há campos alterados de maneiras diferentes neste aparelho e na nuvem. Nenhum dado foi sobrescrito.");
     } else if (result.ok) {
-      if (info) info.textContent = "Mesclagem segura concluída: " + (result.merged || 0) + " registro(s) combinado(s) e " + (result.discarded || 0) + " alteração(ões) já presentes na nuvem descartada(s).";
+      if (info) {
+        info.textContent = result.merged
+          ? "Sincronização concluída com segurança. As informações deste aparelho foram combinadas com as da nuvem. Nenhum dado foi perdido."
+          : "Sincronização concluída com segurança. Os dados deste aparelho e da nuvem foram verificados e estão atualizados. Nenhuma informação foi perdida.";
+      }
       alert("Conflito resolvido com segurança e sincronização concluída.");
     } else if (info) {
       info.textContent = "A nuvem mudou durante a resolução. Os dados locais continuam preservados; tente analisar novamente.";
