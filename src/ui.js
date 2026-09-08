@@ -147,19 +147,6 @@ function resolveAnimalGenealogy(a){
   };
 }
 
-function migrateLegacyGenealogyLinks(){
-  let changed=false;
-  herd.forEach(a=>{
-    if(!a.father || a.fatherReproUid) return;
-    const sire=findReproducerForAnimal(a);
-    if(sire){
-      a.fatherReproUid=sire.uid;
-      changed=true;
-    }
-  });
-  if(changed) save();
-}
-
 function registeredBirthRecords(){
  const byUid=new Map();
  movementEvents.filter(e=>e.type==="birth"&&e.animalUid).forEach(e=>byUid.set(e.animalUid,{uid:e.animalUid,id:e.id||"",sex:e.sex||"",birth:e.date||"",mother:e.mother||"",father:e.father||"",breed:e.breed||"",origin:"Nascimento"}));

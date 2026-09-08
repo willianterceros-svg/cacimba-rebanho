@@ -52,7 +52,7 @@ const RebanhoSync = (() => {
       }
       await pullChanges();
       applySnapshot(await RebanhoData.loadAfterLogin());
-      migrateReproducers(); rebuildPedigreeLibrary(); migrateLegacyGenealogyLinks();
+      migrateReproducers(); rebuildPedigreeLibrary();
       await RebanhoData.setMeta("last_sync", new Date().toISOString());
       refreshAllViews();
       renderSyncInfo();
