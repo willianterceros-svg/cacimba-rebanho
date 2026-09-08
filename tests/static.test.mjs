@@ -52,8 +52,8 @@ test("todos os manipuladores declarados no HTML existem no JavaScript", () => {
 
 test("RPCs novas possuem pasta SQL com o mesmo nome", () => {
   const sources = ["src/sync.js", "src/backup.js"].map(read).join("\n");
-  const names = [...new Set([...sources.matchAll(/rpc\("(rebanho_(?:pull_changes|push_changes|export_backup|import_backup))"/g)].map(match => match[1]))];
-  assert.deepEqual(names.sort(), ["rebanho_export_backup", "rebanho_import_backup", "rebanho_pull_changes", "rebanho_push_changes"]);
+  const names = [...new Set([...sources.matchAll(/rpc\("(rebanho_(?:pull_changes|push_changes|export_backup|import_backup|conflict_context))"/g)].map(match => match[1]))];
+  assert.deepEqual(names.sort(), ["rebanho_conflict_context", "rebanho_export_backup", "rebanho_import_backup", "rebanho_pull_changes", "rebanho_push_changes"]);
   for (const name of names) assert.ok(existsSync(resolve(root, `supabase/database-functions/${name}/function.sql`)), `SQL ausente: ${name}`);
 });
 
