@@ -155,7 +155,7 @@ const RebanhoData = (() => {
         });
       }
     }
-    if (!changes.length) { if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.run({ silent: true }); return; }
+    if (!changes.length) { if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.runAutomatic({ silent: true }); return; }
     const outbox = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`, changes, createdAt: new Date().toISOString(), attempts: 0, conflict: false };
     const db = await open(), stores = [...new Set([...recordsToSave.map(item => item.store), "outbox"])], tx = db.transaction(stores, "readwrite");
     for (const item of recordsToSave) tx.objectStore(item.store).put(item.record);
@@ -165,7 +165,7 @@ const RebanhoData = (() => {
       const entity = Object.keys(entities).find(name => entities[name].store === item.store);
       baselines[entity].set(item.record.uid, structuredClone(item.record));
     }
-    if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.run({ silent: true });
+    if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.runAutomatic({ silent: true });
   }
   async function pendingOutbox() {
     return (await getAll("outbox")).sort((a, b) => a.createdAt.localeCompare(b.createdAt));

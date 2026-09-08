@@ -118,3 +118,19 @@ test("classificação não sobrescreve mudanças divergentes no mesmo campo", ()
   assert.equal(result.safe, false);
   assert.deepEqual([...result.fields], ["father"]);
 });
+
+test("sincronização automática tenta resolver conflitos e busca novidades periodicamente", () => {
+  const sync = read("src/sync.js");
+  const database = read("src/database.js");
+  const auth = read("src/auth.js");
+  const bootstrap = read("src/bootstrap.js");
+  const config = read("src/config.js");
+
+  assert.match(sync, /async function runAutomatic[\s\S]*result\.conflict[\s\S]*resolveConflicts\(\)/);
+  assert.match(database, /RebanhoSync\.runAutomatic/);
+  assert.match(auth, /RebanhoSync\.runAutomatic/);
+  assert.match(bootstrap, /window\.addEventListener\("online"[\s\S]*syncWhenActive/);
+  assert.match(bootstrap, /window\.addEventListener\("pageshow"[\s\S]*syncWhenActive/);
+  assert.match(bootstrap, /setInterval\(syncWhenActive, REBANHO_CONFIG\.syncIntervalMs\)/);
+  assert.match(config, /syncIntervalMs:\s*60000/);
+});

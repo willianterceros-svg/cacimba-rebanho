@@ -147,7 +147,20 @@ const RebanhoSync = (() => {
       return { ok: false, error };
     } finally {
       running = false;
-      if (runAgain) { runAgain = false; queueMicrotask(() => run({ silent: true })); }
+      if (runAgain) { runAgain = false; queueMicrotask(() => runAutomatic({ silent: true })); }
+    }
+  }
+
+  async function runAutomatic({ silent = true } = {}) {
+    const result = await run({ silent: true });
+    if (!result.conflict) return result;
+    try {
+      return await resolveConflicts();
+    } catch (error) {
+      console.error("Falha ao resolver conflito automaticamente", error);
+      renderSyncInfo(error.message);
+      if (!silent) alert("Os dados locais continuam preservados, mas o conflito precisa ser analisado novamente.");
+      return { ok: false, conflict: true, error };
     }
   }
 
@@ -155,13 +168,13 @@ const RebanhoSync = (() => {
     if (!currentUser || !sessionToken || !navigator.onLine || !RebanhoApi.configured()) return { ok: false, offline: true };
     if (running || resolving) return { ok: false, busy: true };
 
-    const batches = (await RebanhoData.pendingOutbox()).filter(batch => batch.conflict);
-    if (!batches.length) return { ok: true, resolvedBatches: 0, merged: 0, discarded: 0 };
-
     let resolvedBatches = 0, merged = 0, discarded = 0;
     const manual = [];
     resolving = true;
     try {
+      const batches = (await RebanhoData.pendingOutbox()).filter(batch => batch.conflict);
+      if (!batches.length) return { ok: true, resolvedBatches: 0, merged: 0, discarded: 0 };
+
       for (const batch of batches) {
         const result = await RebanhoApi.rpc("rebanho_conflict_context", {
           p_token: sessionToken,
@@ -217,14 +230,15 @@ const RebanhoSync = (() => {
     return { ...synced, resolvedBatches, merged, discarded };
   }
 
-  return { run, pullChanges, pushPending, resolveConflicts, mergeThreeWay, classifyChange };
+  return { run, runAutomatic, pullChanges, pushPending, resolveConflicts, mergeThreeWay, classifyChange };
 })();
 
-async function syncFromCloud() { return RebanhoSync.run({ silent: true }); }
-async function pushToCloud() { return RebanhoSync.run({ silent: true }); }
+async function syncFromCloud() { return RebanhoSync.runAutomatic({ silent: true }); }
+async function pushToCloud() { return RebanhoSync.runAutomatic({ silent: true }); }
 async function syncNow(showMessage = false) {
-  const result = await RebanhoSync.run({ silent: !showMessage });
+  const result = await RebanhoSync.runAutomatic({ silent: !showMessage });
   if (showMessage && result.ok) alert("Sincronização concluída.");
+  if (showMessage && result.manual) alert("Existe uma divergência real que precisa de revisão. Os dados locais continuam preservados.");
   return result.ok;
 }
 async function resolveSyncConflicts() {
