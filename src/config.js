@@ -7,5 +7,5 @@ const REBANHO_CONFIG = Object.freeze({
   supabasePublishableKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b2d6d2RpZHplbmZtZHhtaXd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4MDM4OTMsImV4cCI6MjEwMjM3OTg5M30.EXX4HMhPQKcrGh9X9vq9Z8Vr8bqz4shVCKwPk59DO_Y",
   syncPageSize: 750,
   syncIntervalMs: 60000,
-  appVersion: "3.2.14"
+  appVersion: "3.2.15"
 });

@@ -81,6 +81,28 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}.center{text-align:ce
 .action-item{width:100%;border:0;border-top:1px solid var(--line);background:#fff;padding:15px 12px;text-align:left;font-weight:800;color:var(--text)}
 .action-item.danger-item{color:var(--danger)}
 .action-cancel{width:100%;border:0;background:var(--soft);color:var(--green);border-radius:13px;padding:14px;margin-top:8px;font-weight:900}
+.conflict-review-overlay{align-items:center;padding:10px}
+.conflict-review-sheet{display:flex;flex-direction:column;width:min(560px,100%);max-height:calc(100vh - 20px);padding:12px}
+.conflict-review-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.conflict-review-header .action-title{padding-left:4px}
+.conflict-review-intro{margin:0 0 10px}
+.conflict-review-list{overflow-y:auto;overscroll-behavior:contain;padding:2px 2px 12px}
+.conflict-review-actions .btn+.btn{margin-top:0}
+.conflict-record{border:1px solid var(--line);border-radius:15px;padding:12px;margin-top:10px;background:#fff}
+.conflict-record-title{font-weight:900;color:var(--green);margin-bottom:3px}
+.conflict-field{border-top:1px solid #edf0ee;margin-top:11px;padding-top:11px}
+.conflict-field-title{font-size:13px;font-weight:900;margin-bottom:7px}
+.conflict-values{display:grid;gap:7px}
+.conflict-option{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:flex-start;margin:0;padding:10px;border:1px solid var(--line);border-radius:12px;color:var(--text);background:#fff;font-weight:500}
+.conflict-option:has(input:checked){border-color:var(--green);background:var(--soft)}
+.conflict-option input{width:auto;min-height:auto;margin:3px 0 0}
+.conflict-option .conflict-custom-input{grid-column:2;width:100%;min-height:42px;margin:7px 0 0}
+.conflict-option b{display:block;color:var(--green);font-size:12px;margin-bottom:3px}
+.conflict-value{font-size:13px;overflow-wrap:anywhere;white-space:pre-wrap}
+.conflict-custom{grid-template-columns:auto 1fr}.conflict-custom input[type="text"],.conflict-custom textarea{grid-column:2;margin-top:6px;min-height:42px;padding:9px 10px}
+.conflict-review-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:9px;padding-top:10px;border-top:1px solid var(--line)}
+.conflict-review-actions .btn{margin:0}
+@media(max-width:390px){.conflict-review-actions{grid-template-columns:1fr}.conflict-review-sheet{max-height:calc(100vh - 10px)}}
 .pedigree-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .pedigree-card{border:1px solid var(--line);border-radius:13px;padding:11px;background:#fff}
 .pedigree-card b{display:block;color:var(--green);font-size:12px;text-transform:uppercase;margin-bottom:4px}
