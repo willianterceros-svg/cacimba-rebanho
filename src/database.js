@@ -136,13 +136,23 @@ const RebanhoData = (() => {
         const version = Number(previous?.version || 0) + 1;
         const record = { uid, data, version, updated_at: new Date().toISOString(), deleted_at: null };
         recordsToSave.push({ store: definition.store, record });
-        changes.push({ entity, operation: previous ? "update" : "insert", uid, baseVersion: Number(previous?.version || 0), data });
+        changes.push({
+          entity, operation: previous ? "update" : "insert", uid,
+          baseVersion: Number(previous?.version || 0),
+          baseData: previous && !previous.deleted_at ? cleanData(previous.data) : null,
+          data
+        });
       }
       for (const [uid, previous] of baselines[entity]) {
         if (currentIds.has(uid) || previous.deleted_at) continue;
         const record = { ...previous, version: Number(previous.version || 0) + 1, updated_at: new Date().toISOString(), deleted_at: new Date().toISOString() };
         recordsToSave.push({ store: definition.store, record });
-        changes.push({ entity, operation: "delete", uid, baseVersion: Number(previous.version || 0), data: previous.data });
+        changes.push({
+          entity, operation: "delete", uid,
+          baseVersion: Number(previous.version || 0),
+          baseData: cleanData(previous.data),
+          data: cleanData(previous.data)
+        });
       }
     }
     if (!changes.length) { if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.run({ silent: true }); return; }
@@ -165,6 +175,22 @@ const RebanhoData = (() => {
   }
   async function removeOutbox(id) {
     const db = await open(), tx = db.transaction("outbox", "readwrite"); tx.objectStore("outbox").delete(id); await transactionPromise(tx);
+  }
+  async function resolveOutboxBatch(batch, nextChanges, resolvedRecords) {
+    const validRecords = (resolvedRecords || []).filter(item => entities[item.entity] && item.record);
+    const stores = [...new Set(["outbox", ...validRecords.map(item => entities[item.entity].store)])];
+    const db = await open(), tx = db.transaction(stores, "readwrite");
+    for (const item of validRecords) tx.objectStore(entities[item.entity].store).put(item.record);
+    if (nextChanges.length) {
+      tx.objectStore("outbox").put({
+        ...batch, changes: nextChanges, conflict: false, conflicts: [], lastError: "",
+        resolvedAt: new Date().toISOString()
+      });
+    } else {
+      tx.objectStore("outbox").delete(batch.id);
+    }
+    await transactionPromise(tx);
+    for (const item of validRecords) baselines[item.entity].set(item.record.uid, structuredClone(item.record));
   }
   async function applyRemoteChanges(changes) {
     if (!changes?.length) return;
@@ -195,5 +221,5 @@ const RebanhoData = (() => {
     return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
   }
 
-  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData };
+  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData };
 })();

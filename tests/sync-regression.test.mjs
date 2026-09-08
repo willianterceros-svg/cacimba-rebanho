@@ -52,3 +52,69 @@ test("login e sincronização não executam migração persistente de vínculos"
   assert.doesNotMatch(read("src/sync.js"), /migrateLegacyGenealogyLinks/);
   assert.doesNotMatch(read("src/ui.js"), /function\s+migrateLegacyGenealogyLinks/);
 });
+
+function syncContext() {
+  const canonicalize = value => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (!value || typeof value !== "object") return value;
+    return Object.keys(value).sort().reduce((result, key) => { result[key] = canonicalize(value[key]); return result; }, {});
+  };
+  const context = vm.createContext({
+    structuredClone,
+    RebanhoData: { sameData: (left, right) => JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right)) }
+  });
+  vm.runInContext(read("src/sync.js"), context);
+  return context;
+}
+
+test("merge em três vias combina genealogia local com campo remoto diferente", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`RebanhoSync.mergeThreeWay(
+    { father: null, notes: "original", updatedAt: "t0" },
+    { father: "Touro A", notes: "original", updatedAt: "t1" },
+    { father: "", notes: "corrigida na nuvem", updatedAt: "t2" }
+  )`, context);
+
+  assert.deepEqual([...result.conflicts], []);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.value)), { father: "Touro A", notes: "corrigida na nuvem", updatedAt: "t2" });
+});
+
+test("merge em três vias preserva conflito quando o mesmo campo diverge", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`RebanhoSync.mergeThreeWay(
+    { father: null, notes: "original" },
+    { father: "Touro A", notes: "original" },
+    { father: "Touro B", notes: "original" }
+  )`, context);
+
+  assert.deepEqual([...result.conflicts], ["father"]);
+});
+
+test("classificação rebasa uma genealogia local sobre alteração remota independente", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`RebanhoSync.classifyChange(
+    { entity: "animals", operation: "update", uid: "animal_1", baseVersion: 1,
+      baseData: { father: null, notes: "original" }, data: { father: "Touro A", notes: "original" } },
+    { base: { version: 1, data: { father: null, notes: "original" } },
+      server: { uid: "animal_1", version: 2, data: { father: null, notes: "corrigida na nuvem" }, updated_at: "2026-09-08T10:00:00.000Z", deleted_at: null } }
+  )`, context);
+
+  assert.equal(result.safe, true);
+  assert.equal(result.mode, "merged");
+  assert.equal(result.keep.baseVersion, 2);
+  assert.equal(result.keep.data.father, "Touro A");
+  assert.equal(result.keep.data.notes, "corrigida na nuvem");
+});
+
+test("classificação não sobrescreve mudanças divergentes no mesmo campo", () => {
+  const context = syncContext();
+  const result = vm.runInContext(`RebanhoSync.classifyChange(
+    { entity: "animals", operation: "update", uid: "animal_1", baseVersion: 1,
+      baseData: { father: null }, data: { father: "Touro A" } },
+    { base: { version: 1, data: { father: null } },
+      server: { uid: "animal_1", version: 2, data: { father: "Touro B" }, updated_at: "2026-09-08T10:00:00.000Z", deleted_at: null } }
+  )`, context);
+
+  assert.equal(result.safe, false);
+  assert.deepEqual([...result.fields], ["father"]);
+});
