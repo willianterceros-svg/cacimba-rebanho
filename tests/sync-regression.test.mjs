@@ -17,6 +17,13 @@ test("comparação de registros ignora somente a ordem das propriedades", () => 
   assert.equal(vm.runInContext("RebanhoData.sameData({ values: [1, 2] }, { values: [2, 1] })", context), false);
 });
 
+test("alterações grandes são divididas no limite aceito pelo servidor", () => {
+  const context = vm.createContext({ structuredClone });
+  vm.runInContext(read("src/database.js"), context);
+  const sizes = vm.runInContext("RebanhoData.chunkOutboxChanges(Array.from({ length: 4501 }, (_, index) => index)).map(batch => batch.length)", context);
+  assert.deepEqual([...sizes], [2000, 2000, 501]);
+});
+
 test("reconstrução da genealogia não renova updatedAt sem mudança real", () => {
   const context = vm.createContext({});
   vm.runInContext(`

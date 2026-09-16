@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cacimba Rebanho">
 <title>Agropecuária Cacimba — Gestão do Rebanho</title>
-<link rel="stylesheet" href="./assets/css/app.css?v=3.2.15">
+<link rel="stylesheet" href="./assets/css/app.css?v=3.2.16">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lucide@1.40.0/dist/umd/lucide.min.js"></script>
 </head>
@@ -20,6 +20,7 @@
     <div class="brandmark">AC</div>
     <h1>Agropecuária Cacimba</h1>
     <div class="muted">Gestão do Rebanho</div>
+    <span id="loginEnvBadge" class="badge warn hidden" style="margin-bottom:10px">Ambiente de testes (DEV)</span>
     <label>Usuário</label>
     <input id="loginUser" autocomplete="username" placeholder="Digite seu usuário">
     <label>Senha</label>
@@ -30,7 +31,7 @@
     <button class="btn primary" style="margin-top:16px" onclick="doLogin()">Entrar</button>
     <div id="loginError" class="login-error"></div>
   </div>
-  <div class="login-version">Versão 3.2.15</div>
+  <div class="login-version">Versão 3.2.16</div>
 </div>
 
 <div id="firstPasswordShell" class="login-shell hidden">
@@ -73,13 +74,24 @@
   </div>
 </div>
 
+<div id="appModalOverlay" class="action-overlay hidden" role="alertdialog" aria-modal="true" aria-labelledby="appModalTitle">
+  <div class="action-sheet">
+    <div id="appModalTitle" class="action-title"></div>
+    <div id="appModalMessage" class="notice" style="margin:0 10px 14px"></div>
+    <div style="display:flex;gap:8px;padding:0 10px 10px">
+      <button id="appModalCancel" type="button" class="btn secondary" style="flex:1">Cancelar</button>
+      <button id="appModalOk" type="button" class="btn primary" style="flex:1">OK</button>
+    </div>
+  </div>
+</div>
+
 <div id="appShell" class="app hidden">
 <header class="topbar">
   <div class="toprow">
     <button id="backBtn" class="icon" onclick="goBack()" aria-label="Voltar" title="Voltar"><i data-lucide="chevron-left"></i></button>
     <div class="topcenter">
       <h1 id="title">Estoque do Rebanho</h1>
-      <div class="subhead"><span id="subtitle">Agropecuária Cacimba</span><span id="netStatus" class="netstatus online"><i></i>Online</span></div>
+      <div class="subhead"><span id="subtitle">Agropecuária Cacimba</span><span id="netStatus" class="netstatus online"><i></i>Online</span><span id="envBadge" class="badge warn hidden">DEV</span></div>
     </div>
     <button id="accountBtn" class="avatar-btn" onclick="showScreen('account')" aria-label="Minha conta" title="Minha conta"><i data-lucide="user-round"></i></button>
   </div>
@@ -165,10 +177,17 @@
 <section id="importStock" class="screen">
   <div class="card">
     <div class="section-title" style="margin-top:0">Importação de estoque</div>
-    <div class="upload"><input id="stockFile" type="file" accept=".xlsx,.xls,.csv"><label for="stockFile">Selecionar arquivo Excel</label><div id="stockFileName" class="muted" style="margin-top:10px">Nenhum arquivo selecionado</div></div>
-    <div class="notice" style="margin-top:12px">A planilha real será conectada depois. O sistema aceitará animais sem brinco, validará identificações duplicadas e permitirá completar informações após a importação.</div>
+    <div class="upload"><input id="stockFile" type="file" accept=".xlsx,.xls,.csv" onchange="handleStockFile()"><label for="stockFile">Selecionar arquivo Excel</label><div id="stockFileName" class="muted" style="margin-top:10px">Nenhum arquivo selecionado</div></div>
+    <button class="btn secondary" style="margin-top:10px" onclick="downloadStockTemplate()">Baixar modelo de planilha</button>
+    <div class="notice" style="margin-top:12px">Colunas aceitas: Identificação, Sexo, Data de nascimento, Pai, Mãe, Avô paterno, Avó paterna, Avô materno, Avó materna, Raça. Só a Identificação é obrigatória — o que faltar usa o padrão abaixo.</div>
+    <label>Sexo padrão desta planilha</label><select id="importSex" onchange="applyStockRules()"><option value="F">Fêmea</option><option value="M">Macho</option></select>
+    <label>Raça padrão</label><input id="importBreed" value="Nelore" onchange="applyStockRules()">
+    <label>Brinco já cadastrado</label><select id="importDuplicate" onchange="applyStockRules()"><option value="skip">Ignorar a linha</option><option value="fill">Completar dados do animal</option></select>
   </div>
-  <div class="statgrid"><div class="stat"><b>1.080</b>Exemplo: completos</div><div class="stat"><b>146</b>Exemplo: incompletos</div><div class="stat"><b>22</b>Exemplo: divergências</div><div class="stat"><b>4</b>Exemplo: duplicados</div></div>
+  <div id="importSummary" class="statgrid hidden"></div>
+  <div id="importReady" class="card hidden" style="margin-top:12px"></div>
+  <div id="importIssues" class="card hidden" style="margin-top:12px"></div>
+  <div id="importActions" class="hidden" style="margin-top:12px"><button class="btn primary" onclick="confirmStockImport()">Confirmar importação</button><button class="btn secondary" onclick="resetStockImport()">Cancelar</button></div>
 </section>
 
 <section id="moves" class="screen">
@@ -191,8 +210,8 @@
 
   <div id="saleTab" class="hidden">
     <div class="card">
-      <label>Data da venda</label><input id="saleDate" type="date">
-      <label>Comprador</label><input id="saleBuyer" placeholder="Nome do comprador">
+      <label>Data da venda</label><input id="saleDate" type="date" onchange="applySaleRules()">
+      <label>Comprador</label><input id="saleBuyer" placeholder="Nome do comprador" onchange="applySaleRules()">
       <div class="section-title">Forma de lançamento</div>
       <div class="tabrow" style="grid-template-columns:1fr 1fr"><button id="saleManualBtn" class="tabbtn active" onclick="saleMode('manual')">Selecionar</button><button id="saleExcelBtn" class="tabbtn" onclick="saleMode('excel')">Importar Excel</button></div>
       <div id="saleManual">
@@ -200,9 +219,11 @@
         <div id="saleSelected" style="margin-top:10px"></div>
       </div>
       <div id="saleExcel" class="hidden">
-        <div class="upload" style="margin-top:12px"><input id="saleFile" type="file" accept=".xlsx,.xls,.csv"><label for="saleFile">Selecionar lista Excel</label><div id="saleFileName" class="muted" style="margin-top:10px">Nenhum arquivo selecionado</div></div>
-        <button class="btn secondary" style="margin-top:10px" onclick="simulateSaleAnalysis()">Analisar e conferir lista</button>
-        <div id="saleAnalysis" class="hidden" style="margin-top:10px"><div class="statgrid"><div class="stat"><b>96</b>Encontrados</div><div class="stat"><b>2</b>Não encontrados</div><div class="stat"><b>1</b>Duplicado</div><div class="stat"><b>1</b>Já baixado</div></div></div>
+        <div class="upload" style="margin-top:12px"><input id="saleFile" type="file" accept=".xlsx,.xls,.csv" onchange="handleSaleFile()"><label for="saleFile">Selecionar lista Excel</label><div id="saleFileName" class="muted" style="margin-top:10px">Nenhum arquivo selecionado</div></div>
+        <button class="btn secondary" style="margin-top:10px" onclick="downloadSaleTemplate()">Baixar modelo de planilha</button>
+        <div id="saleSummary" class="statgrid hidden" style="margin-top:10px"></div>
+        <div id="saleReady" class="card hidden" style="margin-top:10px"></div>
+        <div id="saleIssues" class="card hidden" style="margin-top:10px"></div>
       </div>
     </div>
     <button class="btn primary" onclick="confirmSale()">Confirmar venda e baixar estoque</button>
@@ -406,15 +427,16 @@
 </div>
 
 
-<script src="./src/config.js?v=3.2.14"></script>
-<script src="./src/api.js?v=3.2.14"></script>
-<script src="./src/database.js?v=3.2.14"></script>
-<script src="./src/state.js?v=3.2.14"></script>
-<script src="./src/sync.js?v=3.2.14"></script>
-<script src="./src/auth.js?v=3.2.14"></script>
-<script src="./src/genealogy.js?v=3.2.14"></script>
-<script src="./src/ui.js?v=3.2.14"></script>
-<script src="./src/backup.js?v=3.2.14"></script>
-<script src="./src/bootstrap.js?v=3.2.14"></script>
+<script src="./src/config.js?v=3.2.16"></script>
+<script src="./src/api.js?v=3.2.16"></script>
+<script src="./src/database.js?v=3.2.16"></script>
+<script src="./src/state.js?v=3.2.16"></script>
+<script src="./src/sync.js?v=3.2.16"></script>
+<script src="./src/auth.js?v=3.2.16"></script>
+<script src="./src/genealogy.js?v=3.2.16"></script>
+<script src="./src/ui.js?v=3.2.16"></script>
+<script src="./src/import.js?v=3.2.16"></script>
+<script src="./src/backup.js?v=3.2.16"></script>
+<script src="./src/bootstrap.js?v=3.2.16"></script>
 </body>
 </html>

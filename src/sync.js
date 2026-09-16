@@ -407,7 +407,8 @@ const conflictFieldLabels = {
   id: "Identificação", name: "Nome", status: "Situação", father: "Pai", mother: "Mãe",
   pgf: "Avô paterno", pgm: "Avó paterna", mgf: "Avô materno", mgm: "Avó materna",
   breed: "Raça", birth: "Nascimento", notes: "Observações", register: "Registro", code: "Código",
-  source: "Origem", fatherReproUid: "Vínculo do pai", damKey: "Vínculo da mãe", registro: "Registro completo"
+  source: "Origem", fatherReproUid: "Vínculo do pai", damKey: "Vínculo da mãe", registro: "Registro completo",
+  importSource: "Planilha de origem"
 };
 const conflictEntityLabels = {
   animals: "Animal", movements: "Movimentação", reproducers: "Reprodutor",
