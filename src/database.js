@@ -15,6 +15,15 @@ const RebanhoData = (() => {
   let syncAfterCapture = false;
   let snapshotProvider = null;
   const baselines = Object.fromEntries(Object.keys(entities).map(name => [name, new Map()]));
+  const OUTBOX_BATCH_LIMIT = 2000;
+
+  function chunkOutboxChanges(changes) {
+    const batches = [];
+    for (let index = 0; index < changes.length; index += OUTBOX_BATCH_LIMIT) {
+      batches.push(changes.slice(index, index + OUTBOX_BATCH_LIMIT));
+    }
+    return batches;
+  }
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -156,10 +165,14 @@ const RebanhoData = (() => {
       }
     }
     if (!changes.length) { if (shouldSync && typeof RebanhoSync !== "undefined") RebanhoSync.runAutomatic({ silent: true }); return; }
-    const outbox = { id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`, changes, createdAt: new Date().toISOString(), attempts: 0, conflict: false };
+    const createdAt = new Date().toISOString();
+    const outboxes = chunkOutboxChanges(changes).map((batchChanges, index) => ({
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${index}_${Math.random()}`,
+      changes: batchChanges, createdAt, attempts: 0, conflict: false
+    }));
     const db = await open(), stores = [...new Set([...recordsToSave.map(item => item.store), "outbox"])], tx = db.transaction(stores, "readwrite");
     for (const item of recordsToSave) tx.objectStore(item.store).put(item.record);
-    tx.objectStore("outbox").put(outbox);
+    for (const outbox of outboxes) tx.objectStore("outbox").put(outbox);
     await transactionPromise(tx);
     for (const item of recordsToSave) {
       const entity = Object.keys(entities).find(name => entities[name].store === item.store);
@@ -228,5 +241,5 @@ const RebanhoData = (() => {
     return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
   }
 
-  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData };
+  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData, chunkOutboxChanges };
 })();

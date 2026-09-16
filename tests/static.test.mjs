@@ -44,7 +44,7 @@ test("todos os arquivos estáticos referenciados existem", () => {
 
 test("todos os manipuladores declarados no HTML existem no JavaScript", () => {
   const html = read("index.html");
-  const sources = ["src/state.js", "src/auth.js", "src/genealogy.js", "src/ui.js", "src/backup.js", "src/bootstrap.js", "src/sync.js"].map(read).join("\n");
+  const sources = ["src/state.js", "src/auth.js", "src/genealogy.js", "src/ui.js", "src/import.js", "src/backup.js", "src/bootstrap.js", "src/sync.js"].map(read).join("\n");
   const handlers = [...new Set([...html.matchAll(/on(?:click|change|input)="([A-Za-z_$][\w$]*)\s*\(/g)].map(match => match[1]))];
   const missing = handlers.filter(name => !new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\(|(?:const|let|var)\\s+${name}\\s*=`).test(sources));
   assert.deepEqual(missing, []);

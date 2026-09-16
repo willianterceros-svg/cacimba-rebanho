@@ -34,11 +34,15 @@ function syncWhenActive() {
   if (["editAnimal", "editRepro"].includes(activeScreen)) return;
   return RebanhoSync.runAutomatic({ silent: true }).catch(error => console.error("Falha na sincronização automática", error));
 }
+function applyEnvBadge() {
+  const isDev = REBANHO_CONFIG.env !== "prod";
+  loginEnvBadge.classList.toggle("hidden", !isDev);
+  envBadge.classList.toggle("hidden", !isDev);
+}
 async function bootstrap() {
+  applyEnvBadge();
   refreshAutomaticDates();
   ["birthDate", "saleDate", "deathDate", "reportDateTo"].forEach(id => document.getElementById(id)?.addEventListener("change", event => { event.currentTarget.dataset.userChanged = "1"; }));
-  stockFile.onchange = event => { stockFileName.textContent = event.target.files[0]?.name || "Nenhum arquivo selecionado"; };
-  saleFile.onchange = event => { saleFileName.textContent = event.target.files[0]?.name || "Nenhum arquivo selecionado"; };
   birthMother.addEventListener("input", () => { const mother = herd.find(animal => animal.id === birthMother.value.trim() && animal.sex === "F"); motherRule.textContent = mother ? "Matriz localizada no estoque. A regra de intervalo mínimo entre partos será verificada ao salvar." : ""; });
   loginPassword.addEventListener("keydown", event => { if (event.key === "Enter") doLogin(); });
   renderIcons();
