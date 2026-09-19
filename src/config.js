@@ -22,7 +22,7 @@ const REBANHO_CONFIG = Object.freeze({
   env: REBANHO_ENV,
   syncPageSize: 750,
   syncIntervalMs: 60000,
-  appVersion: "3.2.16"
+  appVersion: "3.2.17"
 });
 
 console.log(`[Cacimba Rebanho] ambiente: ${REBANHO_CONFIG.env.toUpperCase()} (${REBANHO_ENV_FORCED ? "forçado em REBANHO_ENV_OVERRIDE" : "detectado por hostname"}) — ${REBANHO_CONFIG.supabaseUrl} — versão ${REBANHO_CONFIG.appVersion}`);

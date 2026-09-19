@@ -59,17 +59,20 @@ async function exportFullBackup() {
   try {
     await RebanhoData.captureNow();
     const pendingOutbox = await RebanhoData.pendingOutbox();
+    const archivedOutbox = await RebanhoData.archivedOutbox();
     if (sessionToken && navigator.onLine) {
       try {
         const result = await rpc("rebanho_export_backup", { p_token: sessionToken });
         if (!result?.ok) throw new Error(result?.error || "Falha ao exportar");
-        if (!pendingOutbox.length) { downloadBackup(result.backup); return; }
+        if (!pendingOutbox.length && !archivedOutbox.length) { downloadBackup(result.backup); return; }
         downloadBackup({
           app: "Agropecuária Cacimba — Gestão do Rebanho", backupVersion: 5,
-          generatedAt: new Date().toISOString(), source: "local-with-pending-changes",
-          payload: localSnapshot(), pendingOutbox, cloudBackup: result.backup
+          generatedAt: new Date().toISOString(), source: pendingOutbox.length ? "local-with-pending-changes" : "cloud-with-archived-changes",
+          payload: localSnapshot(), pendingOutbox, archivedOutbox, cloudBackup: result.backup
         });
-        alert("O backup inclui os dados locais e os lançamentos ainda pendentes. A cópia da nuvem também foi anexada para conferência.");
+        alert(pendingOutbox.length
+          ? "O backup inclui os dados locais e os lançamentos ainda pendentes. A cópia da nuvem também foi anexada para conferência."
+          : "O backup inclui a cópia da nuvem e um lote antigo preservado para conferência.");
         return;
       } catch (cloudError) {
         console.error("Falha ao incluir a cópia da nuvem", cloudError);
@@ -78,7 +81,7 @@ async function exportFullBackup() {
     downloadBackup({
       app: "Agropecuária Cacimba — Gestão do Rebanho", backupVersion: 5,
       generatedAt: new Date().toISOString(), source: navigator.onLine ? "local-cloud-unavailable" : "offline-local",
-      payload: localSnapshot(), pendingOutbox
+      payload: localSnapshot(), pendingOutbox, archivedOutbox
     });
     if (navigator.onLine) alert("A nuvem não respondeu; foi baixado um backup local para preservar os lançamentos deste aparelho.");
   } catch (error) { console.error(error); alert("Não foi possível gerar o backup."); }

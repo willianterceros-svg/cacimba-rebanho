@@ -149,6 +149,33 @@ const RebanhoSync = (() => {
     return { keep, recordItem: { entity: change.entity, record } };
   }
 
+  async function recoverRejectedFieldBatch(batch, error) {
+    if (currentUser?.role !== "FIELD" || !["FIELD_CANNOT_EDIT_ANIMAL", "ROLE_DENIED"].includes(error)) return false;
+    if (!batch.changes?.length || batch.changes.some(change => change.baseData != null ||
+      !(["reproducers", "historical_dams", "pedigree"].includes(change.entity) && ["insert", "update"].includes(change.operation)) &&
+      !(change.entity === "animals" && change.operation === "update")
+    )) return false;
+
+    const result = await RebanhoApi.rpc("rebanho_conflict_context", {
+      p_token: sessionToken,
+      p_items: batch.changes.map(change => ({
+        entity: change.entity, uid: change.uid, baseVersion: Number(change.baseVersion || 0),
+        baseData: change.baseData || null
+      }))
+    });
+    if (!result?.ok || result.contexts?.length !== batch.changes.length) return false;
+    const contexts = new Map(result.contexts.map(context => [`${context.entity}:${context.uid}`, context]));
+    const cloudRecords = [];
+    for (const change of batch.changes) {
+      const server = contexts.get(`${change.entity}:${change.uid}`)?.server;
+      if (!server || server.deleted_at || !server.data || Number(server.version) < Number(change.baseVersion || 0)) return false;
+      if (change.entity === "animals" && !RebanhoData.sameData(change.data, server.data)) return false;
+      cloudRecords.push({ entity: change.entity, record: server });
+    }
+    await RebanhoData.archiveRejectedOutbox(batch, cloudRecords, error);
+    return true;
+  }
+
   async function pushPending() {
     const pending = await RebanhoData.pendingOutbox();
     for (const batch of pending) {
@@ -156,6 +183,7 @@ const RebanhoSync = (() => {
       try {
         const result = await RebanhoApi.rpc("rebanho_push_changes", { p_token: sessionToken, p_batch_id: batch.id, p_changes: batch.changes });
         if (!result?.ok) {
+          if (await recoverRejectedFieldBatch(batch, result?.error)) continue;
           const conflict = result?.error === "VERSION_CONFLICT" || Array.isArray(result?.conflicts);
           await RebanhoData.updateOutbox({ ...batch, conflict, conflicts: result?.conflicts || [], lastError: result?.error || "Falha ao enviar", lastAttemptAt: new Date().toISOString(), attempts: Number(batch.attempts || 0) + 1 });
           return { conflict, failed: !conflict, error: result?.error || "Falha ao enviar" };
@@ -399,6 +427,18 @@ async function syncNow(showMessage = false) {
   const result = await RebanhoSync.runAutomatic({ silent: !showMessage });
   if (showMessage && result.ok) alert("Sincronização concluída.");
   if (showMessage && result.manual) alert("Existe uma divergência real que precisa de revisão. Os dados locais continuam preservados.");
+  if (showMessage && !result.ok && !result.manual && !result.conflict) {
+    const errors = {
+      FIELD_CANNOT_EDIT_ANIMAL: "O lote pendente contém uma edição de animal que o perfil de funcionário não pode enviar. Peça ao responsável para revisar esse lote.",
+      ROLE_DENIED: "O lote pendente contém alterações que seu perfil não pode enviar. Peça ao responsável para revisar esse lote."
+    };
+    const message = result.error?.message
+      ? `${errors[result.error.message] || `Não foi possível sincronizar: ${result.error.message}.`} Os dados continuam salvos neste aparelho.`
+      : result.offline
+        ? "É preciso estar online e com a sessão ativa para sincronizar."
+        : "A sincronização já está em andamento. Tente novamente em instantes.";
+    alert(message);
+  }
   return result.ok;
 }
 

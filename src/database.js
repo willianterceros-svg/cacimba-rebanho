@@ -189,6 +189,24 @@ const RebanhoData = (() => {
   async function removeOutbox(id) {
     const db = await open(), tx = db.transaction("outbox", "readwrite"); tx.objectStore("outbox").delete(id); await transactionPromise(tx);
   }
+  async function archiveRejectedOutbox(batch, cloudRecords, reason) {
+    const validRecords = cloudRecords.filter(item => entities[item.entity] && item.record);
+    if (validRecords.length !== batch.changes.length) throw new Error("A cópia da nuvem está incompleta para recuperar o lote.");
+    const stores = [...new Set(["outbox", "meta", ...validRecords.map(item => entities[item.entity].store)])];
+    const db = await open(), tx = db.transaction(stores, "readwrite");
+    tx.objectStore("meta").put({
+      key: `archived_outbox:${batch.id}`,
+      value: { batch: structuredClone(batch), reason, archivedAt: new Date().toISOString() }
+    });
+    for (const item of validRecords) tx.objectStore(entities[item.entity].store).put(item.record);
+    tx.objectStore("outbox").delete(batch.id);
+    await transactionPromise(tx);
+    for (const item of validRecords) baselines[item.entity].set(item.record.uid, structuredClone(item.record));
+  }
+  async function archivedOutbox() {
+    const entries = await getAll("meta");
+    return entries.filter(item => item.key.startsWith("archived_outbox:")).map(item => item.value);
+  }
   async function resolveOutboxBatch(batch, nextChanges, resolvedRecords) {
     const validRecords = (resolvedRecords || []).filter(item => entities[item.entity] && (item.record || (item.remove && item.uid)));
     const stores = [...new Set(["outbox", ...validRecords.map(item => entities[item.entity].store)])];
@@ -241,5 +259,5 @@ const RebanhoData = (() => {
     return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
   }
 
-  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData, chunkOutboxChanges };
+  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, archiveRejectedOutbox, archivedOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData, chunkOutboxChanges };
 })();

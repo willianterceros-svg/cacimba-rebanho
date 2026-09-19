@@ -173,3 +173,68 @@ test("sincronização automática tenta resolver conflitos e busca novidades per
   assert.match(bootstrap, /setInterval\(syncWhenActive, REBANHO_CONFIG\.syncIntervalMs\)/);
   assert.match(config, /syncIntervalMs:\s*60000/);
 });
+
+function rejectedFieldContext(changes, cloudRecords) {
+  const calls = { archived: [], updated: [], rpc: [] };
+  const batch = { id: "old-batch", changes, createdAt: "2026-09-04T17:07:27.224Z", attempts: 87 };
+  const context = vm.createContext({
+    structuredClone,
+    currentUser: { role: "FIELD" },
+    sessionToken: "test-token",
+    RebanhoData: {
+      sameData: (left, right) => JSON.stringify(left) === JSON.stringify(right),
+      pendingOutbox: async () => [batch],
+      archiveRejectedOutbox: async (...args) => calls.archived.push(args),
+      updateOutbox: async item => calls.updated.push(item)
+    },
+    RebanhoApi: {
+      rpc: async (name) => {
+        calls.rpc.push(name);
+        if (name === "rebanho_push_changes") return { ok: false, error: "FIELD_CANNOT_EDIT_ANIMAL" };
+        return { ok: true, contexts: changes.map(change => ({
+          entity: change.entity, uid: change.uid,
+          server: cloudRecords[`${change.entity}:${change.uid}`] || null
+        })) };
+      }
+    }
+  });
+  vm.runInContext(read("src/sync.js"), context);
+  return { context, calls };
+}
+
+test("lote antigo recusado por permissão é arquivado quando o animal já está igual na nuvem", async () => {
+  const changes = [
+    { entity: "animals", operation: "update", uid: "animal-1", baseVersion: 1, data: { status: "ATIVO" } },
+    { entity: "pedigree", operation: "update", uid: "parent-1", baseVersion: 1, data: { father: "Antigo" } }
+  ];
+  const cloudRecords = {
+    "animals:animal-1": { uid: "animal-1", version: 2, data: { status: "ATIVO" }, deleted_at: null },
+    "pedigree:parent-1": { uid: "parent-1", version: 3, data: { father: "Atual" }, deleted_at: null }
+  };
+  const { context, calls } = rejectedFieldContext(changes, cloudRecords);
+
+  const result = await vm.runInContext("RebanhoSync.pushPending()", context);
+
+  assert.equal(result.conflict, false);
+  assert.equal(calls.archived.length, 1);
+  assert.equal(calls.archived[0][1][1].record.data.father, "Atual");
+  assert.deepEqual(calls.rpc, ["rebanho_push_changes", "rebanho_conflict_context"]);
+  assert.equal(calls.updated.length, 0);
+});
+
+test("recusa não arquiva lote com lançamento permitido ou edição local real de animal", async () => {
+  for (const changes of [
+    [{ entity: "animals", operation: "update", uid: "animal-1", baseVersion: 1, data: { status: "ATIVO", notes: "Local" } }],
+    [{ entity: "movements", operation: "insert", uid: "movement-1", baseVersion: 0, data: { type: "birth" } }],
+    [{ entity: "animals", operation: "update", uid: "animal-1", baseVersion: 1, baseData: { status: "ATIVO" }, data: { status: "ATIVO", notes: "Nuvem" } }]
+  ]) {
+    const cloudRecords = {
+      "animals:animal-1": { uid: "animal-1", version: 2, data: { status: "ATIVO", notes: "Nuvem" }, deleted_at: null }
+    };
+    const { context, calls } = rejectedFieldContext(changes, cloudRecords);
+    const result = await vm.runInContext("RebanhoSync.pushPending()", context);
+    assert.equal(result.failed, true);
+    assert.equal(calls.archived.length, 0);
+    assert.equal(calls.updated.length, 1);
+  }
+});
