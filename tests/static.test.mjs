@@ -28,6 +28,22 @@ test("aplicação permanece escondida antes do login", () => {
   assert.doesNotMatch(read("src/bootstrap.js"), /renderStock\(\).*else/);
 });
 
+test("versão aparece no login, na troca de senha e no cabeçalho fixo do aplicativo", () => {
+  const html = read("index.html");
+  const config = read("src/config.js");
+  const serviceWorker = read("sw.js");
+  const css = read("assets/css/app.css");
+  const version = config.match(/appVersion:\s*"([0-9.]+)"/)?.[1];
+  assert.ok(version);
+  const displayed = [...html.matchAll(/class="(?:login-version|app-version)">Versão ([0-9.]+)<\/div>/g)].map(match => match[1]);
+  assert.deepEqual(displayed, [version, version, version]);
+  const assets = [...html.matchAll(/(?:src|href)="\.\/[^"?#]+\?v=([0-9.]+)"/g)].map(match => match[1]);
+  assert.ok(assets.length > 0);
+  assert.ok(assets.every(item => item === version));
+  assert.ok(serviceWorker.includes("const CACHE_NAME = `${CACHE_PREFIX}" + version + "`;"));
+  assert.match(css, /\.topbar\{position:sticky/);
+});
+
 test("mantém as chaves da autenticação original", () => {
   const authentication = ["src/state.js", "src/auth.js"].map(read).join("\n");
   for (const key of ["cacimba2_current_user", "cacimba2_session_token", "cacimba2_offline_login"]) assert.match(authentication, new RegExp(key));
