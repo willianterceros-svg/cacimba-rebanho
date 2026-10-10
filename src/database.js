@@ -14,6 +14,7 @@ const RebanhoData = (() => {
   let captureQueue = Promise.resolve();
   let syncAfterCapture = false;
   let snapshotProvider = null;
+  let localRevision = 0;
   const baselines = Object.fromEntries(Object.keys(entities).map(name => [name, new Map()]));
   const OUTBOX_BATCH_LIMIT = 2000;
 
@@ -95,28 +96,43 @@ const RebanhoData = (() => {
     }
     throw new Error(`Registro sem identificador em ${entity}`);
   }
-  async function loadAfterLogin() {
-    const snapshot = { schemaVersion: 5 };
+  async function readLocalState() {
+    const snapshot = { schemaVersion: 5 }, records = {};
     for (const [entity, definition] of Object.entries(entities)) {
-      const records = await getAll(definition.store);
-      baselines[entity].clear();
-      const active = [];
-      for (const record of records) {
-        baselines[entity].set(record.uid, structuredClone(record));
-        if (!record.deleted_at) active.push(structuredClone(record.data));
-      }
-      snapshot[definition.collection] = active;
+      records[entity] = await getAll(definition.store);
+      snapshot[definition.collection] = records[entity].filter(record => !record.deleted_at).map(record => structuredClone(record.data));
     }
-    return snapshot;
+    return { snapshot, records };
+  }
+  function commitBaselines(records) {
+    for (const entity of Object.keys(entities)) {
+      baselines[entity].clear();
+      for (const record of records[entity]) baselines[entity].set(record.uid, structuredClone(record));
+    }
+  }
+  async function loadAfterLogin() {
+    const state = await readLocalState();
+    commitBaselines(state.records);
+    return state.snapshot;
+  }
+  async function loadStable(applyState) {
+    while (true) {
+      await captureNow();
+      const revision = localRevision;
+      const state = await readLocalState();
+      if (revision !== localRevision) continue;
+      commitBaselines(state.records);
+      applyState(state.snapshot);
+      return state.snapshot;
+    }
   }
   function scheduleCapture(provider, shouldSync = false) {
     if (!currentUser) return;
+    localRevision++;
     snapshotProvider = provider;
     syncAfterCapture ||= shouldSync;
     if (captureScheduled) return;
     captureScheduled = true;
-    // Executa ao final da ação atual: agrupa animal, movimentação e histórico,
-    // sem deixar uma janela de debounce na qual fechar a página perderia dados.
     queueMicrotask(async () => {
       captureScheduled = false;
       try { await captureNow(); } catch (error) { console.error("Falha ao salvar localmente", error); alert("Não foi possível salvar este lançamento no aparelho."); }
@@ -130,6 +146,7 @@ const RebanhoData = (() => {
     return next;
   }
   async function captureSnapshot() {
+    localRevision++;
     const shouldSync = syncAfterCapture;
     syncAfterCapture = false;
     const snapshot = snapshotProvider();
@@ -153,7 +170,7 @@ const RebanhoData = (() => {
         });
       }
       for (const [uid, previous] of baselines[entity]) {
-        if (currentIds.has(uid) || previous.deleted_at) continue;
+        if (currentIds.has(uid) || previous.deleted_at || currentUser?.role === "FIELD") continue;
         const record = { ...previous, version: Number(previous.version || 0) + 1, updated_at: new Date().toISOString(), deleted_at: new Date().toISOString() };
         recordsToSave.push({ store: definition.store, record });
         changes.push({
@@ -201,7 +218,23 @@ const RebanhoData = (() => {
     for (const item of validRecords) tx.objectStore(entities[item.entity].store).put(item.record);
     tx.objectStore("outbox").delete(batch.id);
     await transactionPromise(tx);
-    for (const item of validRecords) baselines[item.entity].set(item.record.uid, structuredClone(item.record));
+  }
+  async function discardOutboxBatch(batch, items, reason) {
+    const valid = items.filter(item => entities[item.entity] && (item.record || (item.remove && item.uid)));
+    if (valid.length !== batch.changes.length) throw new Error("A cópia da nuvem está incompleta para descartar o lote.");
+    const stores = [...new Set(["outbox", "meta", ...valid.map(item => entities[item.entity].store)])];
+    const db = await open(), tx = db.transaction(stores, "readwrite");
+    tx.objectStore("meta").put({
+      key: `archived_outbox:${batch.id}`,
+      value: { batch: structuredClone(batch), reason, archivedAt: new Date().toISOString(), discardedByUser: true }
+    });
+    for (const item of valid) {
+      const store = tx.objectStore(entities[item.entity].store);
+      if (item.remove) store.delete(String(item.uid));
+      else store.put(item.record);
+    }
+    tx.objectStore("outbox").delete(batch.id);
+    await transactionPromise(tx);
   }
   async function archivedOutbox() {
     const entries = await getAll("meta");
@@ -225,10 +258,6 @@ const RebanhoData = (() => {
       tx.objectStore("outbox").delete(batch.id);
     }
     await transactionPromise(tx);
-    for (const item of validRecords) {
-      if (item.remove) baselines[item.entity].delete(String(item.uid));
-      else baselines[item.entity].set(item.record.uid, structuredClone(item.record));
-    }
   }
   async function applyRemoteChanges(changes) {
     if (!changes?.length) return;
@@ -243,7 +272,6 @@ const RebanhoData = (() => {
         updated_at: source.updated_at || new Date().toISOString(), deleted_at: source.deleted_at || null
       };
       tx.objectStore(definition.store).put(record);
-      baselines[change.entity].set(record.uid, structuredClone(record));
     }
     await transactionPromise(tx);
   }
@@ -256,8 +284,8 @@ const RebanhoData = (() => {
   }
   async function status() {
     const outbox = await pendingOutbox();
-    return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
+    return { pending: outbox.length, conflicts: outbox.filter(item => item.conflict).length, rejected: outbox.filter(item => item.rejected).length, cursor: await getMeta("sync_cursor", 0), lastSync: await getMeta("last_sync", "") };
   }
 
-  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, archiveRejectedOutbox, archivedOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData, chunkOutboxChanges };
+  return { entities, open, getAll, getMeta, setMeta, loadAfterLogin, scheduleCapture, captureNow, pendingOutbox, updateOutbox, removeOutbox, archiveRejectedOutbox, archivedOutbox, resolveOutboxBatch, applyRemoteChanges, replaceFromImportedSnapshot, status, sameData, chunkOutboxChanges, loadStable, discardOutboxBatch };
 })();

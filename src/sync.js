@@ -5,6 +5,7 @@ const RebanhoSync = (() => {
   let pendingReview = [];
   const blankGenealogyFields = new Set(["father", "mother", "pgf", "pgm", "mgf", "mgm", "fatherReproUid", "damKey"]);
   const derivedMetadataFields = new Set(["updatedAt", "source"]);
+  const REJECTION_ERRORS = new Set(["ROLE_DENIED", "FIELD_CANNOT_EDIT_ANIMAL", "FIELD_CAN_ONLY_REGISTER_BIRTH", "FIELD_CANNOT_EDIT_HISTORY", "DUPLICATE_VALUE", "DUPLICATE_CHANGE", "INVALID_CHANGE", "INVALID_ENTITY", "BATCH_TOO_LARGE"]);
 
   function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -149,12 +150,16 @@ const RebanhoSync = (() => {
     return { keep, recordItem: { entity: change.entity, record } };
   }
 
+  function recoverableFieldChange(change) {
+    if (change.operation === "delete") return true;
+    if (change.baseData != null) return false;
+    if (["reproducers", "historical_dams", "pedigree"].includes(change.entity)) return ["insert", "update"].includes(change.operation);
+    return change.entity === "animals" && change.operation === "update";
+  }
+
   async function recoverRejectedFieldBatch(batch, error) {
     if (currentUser?.role !== "FIELD" || !["FIELD_CANNOT_EDIT_ANIMAL", "ROLE_DENIED"].includes(error)) return false;
-    if (!batch.changes?.length || batch.changes.some(change => change.baseData != null ||
-      !(["reproducers", "historical_dams", "pedigree"].includes(change.entity) && ["insert", "update"].includes(change.operation)) &&
-      !(change.entity === "animals" && change.operation === "update")
-    )) return false;
+    if (!batch.changes?.length || !batch.changes.every(recoverableFieldChange)) return false;
 
     const result = await RebanhoApi.rpc("rebanho_conflict_context", {
       p_token: sessionToken,
@@ -169,7 +174,8 @@ const RebanhoSync = (() => {
     for (const change of batch.changes) {
       const server = contexts.get(`${change.entity}:${change.uid}`)?.server;
       if (!server || server.deleted_at || !server.data || Number(server.version) < Number(change.baseVersion || 0)) return false;
-      if (change.entity === "animals" && !RebanhoData.sameData(change.data, server.data)) return false;
+      if (change.entity === "animals" && change.operation === "update" && !RebanhoData.sameData(change.data, server.data)) return false;
+      if (change.operation === "delete" && !RebanhoData.sameData(change.baseData, server.data)) return false;
       cloudRecords.push({ entity: change.entity, record: server });
     }
     await RebanhoData.archiveRejectedOutbox(batch, cloudRecords, error);
@@ -185,8 +191,10 @@ const RebanhoSync = (() => {
         if (!result?.ok) {
           if (await recoverRejectedFieldBatch(batch, result?.error)) continue;
           const conflict = result?.error === "VERSION_CONFLICT" || Array.isArray(result?.conflicts);
-          await RebanhoData.updateOutbox({ ...batch, conflict, conflicts: result?.conflicts || [], lastError: result?.error || "Falha ao enviar", lastAttemptAt: new Date().toISOString(), attempts: Number(batch.attempts || 0) + 1 });
-          return { conflict, failed: !conflict, error: result?.error || "Falha ao enviar" };
+          const error = result?.error || "Falha ao enviar";
+          const rejected = !conflict && REJECTION_ERRORS.has(error);
+          await RebanhoData.updateOutbox({ ...batch, conflict, rejected, conflicts: result?.conflicts || [], lastError: error, lastAttemptAt: new Date().toISOString(), attempts: Number(batch.attempts || 0) + 1 });
+          return { conflict, failed: !conflict, rejected, error };
         }
         await RebanhoData.removeOutbox(batch.id);
       } catch (error) {
@@ -233,7 +241,7 @@ const RebanhoSync = (() => {
         return { ok: false, error };
       }
       await pullChanges();
-      applySnapshot(await RebanhoData.loadAfterLogin());
+      await RebanhoData.loadStable(applySnapshot);
       migrateReproducers(); rebuildPedigreeLibrary();
       await RebanhoData.setMeta("last_sync", new Date().toISOString());
       refreshAllViews();
@@ -331,7 +339,7 @@ const RebanhoSync = (() => {
         discarded += batchDiscarded;
       }
 
-      applySnapshot(await RebanhoData.loadAfterLogin());
+      await RebanhoData.loadStable(applySnapshot);
       migrateReproducers(); rebuildPedigreeLibrary();
       refreshAllViews();
     } finally {
@@ -405,7 +413,7 @@ const RebanhoSync = (() => {
         await RebanhoData.resolveOutboxBatch(plan.batch, plan.nextChanges, plan.records);
       }
       pendingReview = [];
-      applySnapshot(await RebanhoData.loadAfterLogin());
+      await RebanhoData.loadStable(applySnapshot);
       migrateReproducers(); rebuildPedigreeLibrary();
       refreshAllViews();
     } finally {
@@ -418,8 +426,72 @@ const RebanhoSync = (() => {
 
   function getPendingReview() { return structuredClone(pendingReview); }
 
-  return { run, runAutomatic, pullChanges, pushPending, resolveConflicts, applyManualResolutions, getPendingReview, mergeThreeWay, classifyChange, resolveManualChange };
+  async function cloudRecordsFor(batch) {
+    const result = await RebanhoApi.rpc("rebanho_conflict_context", {
+      p_token: sessionToken,
+      p_items: batch.changes.map(change => ({
+        entity: change.entity, uid: change.uid, baseVersion: Number(change.baseVersion || 0),
+        baseData: isPlainObject(change.baseData) ? change.baseData : null
+      }))
+    });
+    if (!result?.ok) throw new Error(result?.error || "Não foi possível consultar a nuvem");
+    return new Map((result.contexts || []).map(context => [`${context.entity}:${context.uid}`, context.server || null]));
+  }
+
+  function cloudStateOf(change, server) {
+    if (!server) return "missing";
+    if (server.deleted_at) return "deleted";
+    const expected = change.operation === "delete" ? change.baseData : change.data;
+    return RebanhoData.sameData(expected || {}, server.data || {}) ? "same" : "different";
+  }
+
+  async function reviewRejected() {
+    const batch = (await RebanhoData.pendingOutbox()).find(item => item.rejected);
+    if (!batch) return null;
+    const servers = await cloudRecordsFor(batch);
+    return {
+      batchId: batch.id, error: batch.lastError, createdAt: batch.createdAt,
+      items: batch.changes.map(change => ({
+        entity: change.entity, operation: change.operation, uid: change.uid,
+        data: structuredClone(change.data || {}),
+        cloud: cloudStateOf(change, servers.get(`${change.entity}:${change.uid}`))
+      }))
+    };
+  }
+
+  async function discardRejected(batchId) {
+    if (!currentUser || !sessionToken || !navigator.onLine || !RebanhoApi.configured()) return { ok: false, offline: true };
+    if (running || resolving) return { ok: false, busy: true };
+    resolving = true;
+    try {
+      const batch = (await RebanhoData.pendingOutbox()).find(item => item.id === batchId && item.rejected);
+      if (!batch) return { ok: false, missing: true };
+      const servers = await cloudRecordsFor(batch);
+      const items = batch.changes.map(change => {
+        const server = servers.get(`${change.entity}:${change.uid}`);
+        return server ? { entity: change.entity, record: server } : { entity: change.entity, uid: change.uid, remove: true };
+      });
+      await RebanhoData.discardOutboxBatch(batch, items, batch.lastError);
+      await RebanhoData.loadStable(applySnapshot);
+      migrateReproducers(); rebuildPedigreeLibrary();
+      refreshAllViews();
+      return { ok: true };
+    } finally {
+      resolving = false;
+    }
+  }
+
+
+  return { run, runAutomatic, pullChanges, pushPending, resolveConflicts, applyManualResolutions, getPendingReview, mergeThreeWay, classifyChange, resolveManualChange, reviewRejected, discardRejected };
 })();
+
+const syncErrorMessages = {
+  FIELD_CANNOT_EDIT_ANIMAL: "O lote pendente contém uma edição de animal que o perfil de funcionário não pode enviar. Toque em “Revisar lote recusado”.",
+  ROLE_DENIED: "O lote pendente contém alterações que seu perfil não pode enviar. Toque em “Revisar lote recusado”.",
+  FIELD_CAN_ONLY_REGISTER_BIRTH: "Funcionário de campo só pode cadastrar animais por nascimento. Toque em “Revisar lote recusado”.",
+  FIELD_CANNOT_EDIT_HISTORY: "Funcionário de campo não pode alterar movimentações ou histórico já lançados. Toque em “Revisar lote recusado”.",
+  DUPLICATE_VALUE: "Já existe na nuvem um registro com a mesma identificação. Toque em “Revisar lote recusado”."
+};
 
 async function syncFromCloud() { return RebanhoSync.runAutomatic({ silent: true }); }
 async function pushToCloud() { return RebanhoSync.runAutomatic({ silent: true }); }
@@ -428,12 +500,8 @@ async function syncNow(showMessage = false) {
   if (showMessage && result.ok) alert("Sincronização concluída.");
   if (showMessage && result.manual) alert("Existe uma divergência real que precisa de revisão. Os dados locais continuam preservados.");
   if (showMessage && !result.ok && !result.manual && !result.conflict) {
-    const errors = {
-      FIELD_CANNOT_EDIT_ANIMAL: "O lote pendente contém uma edição de animal que o perfil de funcionário não pode enviar. Peça ao responsável para revisar esse lote.",
-      ROLE_DENIED: "O lote pendente contém alterações que seu perfil não pode enviar. Peça ao responsável para revisar esse lote."
-    };
     const message = result.error?.message
-      ? `${errors[result.error.message] || `Não foi possível sincronizar: ${result.error.message}.`} Os dados continuam salvos neste aparelho.`
+      ? `${syncErrorMessages[result.error.message] || `Não foi possível sincronizar: ${result.error.message}.`} Os dados continuam salvos neste aparelho.`
       : result.offline
         ? "É preciso estar online e com a sessão ativa para sincronizar."
         : "A sincronização já está em andamento. Tente novamente em instantes.";
@@ -627,11 +695,102 @@ async function renderSyncInfo(error = "") {
   const status = await RebanhoData.status();
   const conflictButton = document.getElementById("resolveConflictsBtn");
   if (conflictButton) conflictButton.classList.toggle("hidden", status.conflicts === 0);
+  const rejectedButton = document.getElementById("rejectedReviewBtn");
+  if (rejectedButton) rejectedButton.classList.toggle("hidden", status.rejected === 0);
   const when = status.lastSync ? new Date(status.lastSync).toLocaleString("pt-BR") : "ainda não sincronizado";
   const connection = navigator.onLine ? "Online" : "Offline";
   element.replaceChildren();
   const title = document.createElement("b"); title.textContent = connection;
-  const details = document.createElement("div"); details.textContent = `Última sincronização: ${when} • ${status.pending} lote(s) pendente(s) • ${status.conflicts} conflito(s)`;
+  const details = document.createElement("div"); details.textContent = `Última sincronização: ${when} • ${status.pending} lote(s) pendente(s) • ${status.conflicts} conflito(s)${status.rejected ? ` • ${status.rejected} recusado(s)` : ""}`;
   const note = document.createElement("span"); note.className = "muted"; note.textContent = error || "Somente registros alterados são enviados. Lançamentos offline permanecem neste aparelho até a conexão voltar.";
   element.append(title, document.createElement("br"), details, note);
+}
+
+const rejectedOperationLabels = { insert: "Incluir", update: "Alterar", delete: "Excluir" };
+const rejectedKeepLabels = {
+  same: "Igual na nuvem — descartar não perde nada.",
+  deleted: "Já excluído na nuvem — descartar não perde nada.",
+  missing: "Não existe na nuvem — descartar não perde nada.",
+  different: "Continua na nuvem como está — descartar não perde nada."
+};
+const rejectedLossLabels = {
+  deleted: "Excluído na nuvem — esta alteração será perdida neste aparelho.",
+  missing: "Não existe na nuvem — este lançamento será perdido neste aparelho.",
+  different: "Diferente na nuvem — a alteração deste aparelho será perdida e fica a versão da nuvem."
+};
+let visibleRejectedReview = null;
+
+function rejectedItemLoses(item) {
+  return item.operation !== "delete" && item.cloud !== "same";
+}
+function rejectedItemStateText(item) {
+  return rejectedItemLoses(item) ? rejectedLossLabels[item.cloud] : rejectedKeepLabels[item.cloud];
+}
+
+function rejectedItemTitle(item) {
+  const entity = (conflictEntityLabels[item.entity] || "registro").toLowerCase();
+  const reference = item.data.id || item.data.name || item.data.msg || item.uid;
+  return `${rejectedOperationLabels[item.operation] || item.operation} ${entity}: ${reference}`;
+}
+function closeRejectedReview() {
+  const overlay = document.getElementById("rejectedReviewOverlay");
+  if (overlay) overlay.classList.add("hidden");
+  document.body.style.overflow = "";
+  visibleRejectedReview = null;
+}
+async function openRejectedReview() {
+  const button = document.getElementById("rejectedReviewBtn");
+  if (!navigator.onLine || !sessionToken) return alert("É preciso estar online para revisar o lote recusado.");
+  if (button) button.disabled = true;
+  try {
+    const review = await RebanhoSync.reviewRejected();
+    if (!review) {
+      await renderSyncInfo();
+      return alert("Não há lote recusado neste aparelho.");
+    }
+    visibleRejectedReview = review;
+    document.getElementById("rejectedReviewReason").textContent = syncErrorMessages[review.error] || `A nuvem recusou o lote: ${review.error}.`;
+    const list = document.getElementById("rejectedReviewList");
+    list.replaceChildren();
+    for (const item of review.items) {
+      const row = document.createElement("section"); row.className = "conflict-record";
+      const title = document.createElement("div"); title.className = "conflict-record-title"; title.textContent = rejectedItemTitle(item);
+      const state = document.createElement("div"); state.className = rejectedItemLoses(item) ? "rejected-loss" : "muted"; state.textContent = rejectedItemStateText(item);
+      row.append(title, state); list.append(row);
+    }
+    const overlay = document.getElementById("rejectedReviewOverlay");
+    overlay.classList.remove("hidden"); document.body.style.overflow = "hidden"; renderIcons(overlay);
+  } catch (error) {
+    console.error(error);
+    alert("Não foi possível consultar a nuvem agora. Nada foi alterado.");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+async function confirmDiscardRejected() {
+  const review = visibleRejectedReview;
+  if (!review) return;
+  const lost = review.items.filter(rejectedItemLoses).length;
+  const question = lost
+    ? `${lost} lançamento(s) deste aparelho não estão na nuvem e serão perdidos (os itens em vermelho). Uma cópia fica guardada no backup JSON. Descartar mesmo assim?`
+    : "Descartar o lote recusado e manter os dados da nuvem? Nenhuma informação da nuvem será perdida.";
+  if (!confirm(question)) return;
+  const button = document.getElementById("discardRejectedBtn");
+  if (button) { button.disabled = true; button.textContent = "Descartando..."; }
+  try {
+    const result = await RebanhoSync.discardRejected(review.batchId);
+    if (!result.ok) {
+      throw new Error(result.offline ? "É preciso estar online para descartar o lote."
+        : result.busy ? "A sincronização está em andamento. Tente novamente em instantes."
+        : "Este lote não está mais pendente.");
+    }
+    closeRejectedReview();
+    await RebanhoSync.runAutomatic({ silent: true });
+    await renderSyncInfo();
+    alert("Lote descartado. Os dados da nuvem foram mantidos e a fila voltou a andar.");
+  } catch (error) {
+    alert(error.message || "Não foi possível descartar o lote. Nada foi alterado.");
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Descartar e manter a nuvem"; }
+  }
 }

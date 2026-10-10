@@ -61,9 +61,8 @@ begin
       v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object('entity', v_entity, 'uid', v_uid, 'server', v_existing, 'local', v_item));
     end if;
 
-    -- Mantém exatamente os mesmos perfis da autenticação antiga.
     if v_user.role = 'FIELD' then
-      if v_entity in ('reproducers','historical_dams','pedigree') or v_operation = 'delete' then
+      if v_entity in ('reproducers','historical_dams') or v_operation = 'delete' then
         return jsonb_build_object('ok', false, 'error', 'ROLE_DENIED');
       elsif v_entity = 'animals' and v_operation = 'insert' and coalesce(v_data ->> 'origin', '') <> 'Nascimento' then
         return jsonb_build_object('ok', false, 'error', 'FIELD_CAN_ONLY_REGISTER_BIRTH');

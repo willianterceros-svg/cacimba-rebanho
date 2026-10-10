@@ -78,3 +78,20 @@ test("esquema incremental não remove as três tabelas antigas", () => {
   assert.doesNotMatch(schema, /drop\s+table/i);
   assert.match(schema, /Não remove nem altera rebanho_users, rebanho_sessions ou rebanho_state/);
 });
+
+test("atualização preserva o banco local do aparelho sem exigir limpeza de dados", () => {
+  const database = read("src/database.js");
+  assert.match(database, /const DB_NAME = "cacimba_rebanho_ajustada";/);
+  assert.match(database, /const DB_VERSION = 1;/);
+  for (const file of ["src/database.js", "src/sync.js", "src/auth.js", "src/bootstrap.js", "src/backup.js", "sw.js"]) {
+    assert.doesNotMatch(read(file), /deleteDatabase|localStorage\.clear|sessionStorage\.clear|\.storage\.clear/, file);
+  }
+  const serviceWorker = read("sw.js");
+  assert.match(serviceWorker, /keys\.filter\(key => key\.startsWith\(CACHE_PREFIX\) && key !== CACHE_NAME\)/);
+});
+
+test("SQL do repositório segue a produção: campo envia genealogia, mas não exclui nem altera reprodutores", () => {
+  const sql = read("supabase/database-functions/rebanho_push_changes/function.sql");
+  assert.match(sql, /if v_entity in \('reproducers','historical_dams'\) or v_operation = 'delete' then\s+return jsonb_build_object\('ok', false, 'error', 'ROLE_DENIED'\);/);
+  assert.doesNotMatch(sql, /'historical_dams','pedigree'\) or v_operation = 'delete'/);
+});

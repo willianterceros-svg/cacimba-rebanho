@@ -238,3 +238,41 @@ test("recusa não arquiva lote com lançamento permitido ou edição local real 
     assert.equal(calls.updated.length, 1);
   }
 });
+
+test("exclusão fantasma de campo é arquivada e o registro volta da nuvem", async () => {
+  const animal = { uid: "u_F085", id: "F085", origin: "Nascimento", mother: "824" };
+  const movement = { eventUid: "mov_F085", type: "birth", animalUid: "u_F085", id: "F085" };
+  const changes = [
+    { entity: "animals", operation: "delete", uid: "u_F085", baseVersion: 1, baseData: animal, data: animal },
+    { entity: "movements", operation: "delete", uid: "mov_F085", baseVersion: 1, baseData: movement, data: movement }
+  ];
+  const cloudRecords = {
+    "animals:u_F085": { uid: "u_F085", version: 1, data: animal, deleted_at: null },
+    "movements:mov_F085": { uid: "mov_F085", version: 1, data: movement, deleted_at: null }
+  };
+  const { context, calls } = rejectedFieldContext(changes, cloudRecords);
+
+  const result = await vm.runInContext("RebanhoSync.pushPending()", context);
+
+  assert.equal(result.conflict, false);
+  assert.equal(result.failed, undefined);
+  assert.equal(calls.archived.length, 1);
+  assert.deepEqual(Array.from(calls.archived[0][1], item => item.record.uid), ["u_F085", "mov_F085"]);
+  assert.equal(calls.updated.length, 0);
+});
+
+test("exclusão de campo não é descartada quando a nuvem mudou ou já excluiu o registro", async () => {
+  const animal = { uid: "u_F085", id: "F085", status: "ATIVO" };
+  const change = { entity: "animals", operation: "delete", uid: "u_F085", baseVersion: 1, baseData: animal, data: animal };
+  for (const server of [
+    { uid: "u_F085", version: 2, data: { ...animal, status: "VENDIDO" }, deleted_at: null },
+    { uid: "u_F085", version: 2, data: animal, deleted_at: "2026-10-10T12:00:00.000Z" },
+    null
+  ]) {
+    const { context, calls } = rejectedFieldContext([change], { "animals:u_F085": server });
+    const result = await vm.runInContext("RebanhoSync.pushPending()", context);
+    assert.equal(result.failed, true);
+    assert.equal(calls.archived.length, 0);
+    assert.equal(calls.updated.length, 1);
+  }
+});
